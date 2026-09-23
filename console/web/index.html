@@ -1,136 +1,38 @@
 <!doctype html>
 <html lang="en">
 <head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Validation Console</title>
-  <link rel="stylesheet" href="/static/style.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Validation Operator Console</title>
+<link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-  <main class="shell">
-    <header class="topbar">
-      <div>
-        <div class="eyebrow">VALIDATION</div>
-        <h1>Operations Console</h1>
-      </div>
-      <div class="system-state">
-        <span id="system-dot" class="dot"></span>
-        <span id="system-state">STARTING</span>
-        <span id="clock" class="muted">--:--:--</span>
-      </div>
-    </header>
+<main class="shell">
+<header class="topbar">
+  <div><div class="eyebrow">VALIDATION</div><h1>Operator Console</h1></div>
+  <div class="top-state"><span id="clock">--:--:--</span><span class="dot"></span><span>LOCAL</span></div>
+</header>
 
-    <section class="toolbar">
-      <button class="primary" onclick="systemAction('start')">START ALL</button>
-      <button onclick="systemAction('stop')">STOP ALL</button>
-      <button onclick="refresh()">REFRESH</button>
-    </section>
+<section class="servicebar">
+  <div><b>ROUTER</b><span id="router-state" class="state">--</span><button onclick="serviceAction('router','start')">START</button><button onclick="serviceAction('router','stop')">STOP</button></div>
+  <div><b>PARSER</b><span id="parser-state" class="state">--</span><button onclick="serviceAction('parser','start')">START</button><button onclick="serviceAction('parser','stop')">STOP</button></div>
+  <div><b>FORWARDER</b><span id="forwarder-state" class="state">--</span><button onclick="serviceAction('forwarder','start')">START</button><button onclick="serviceAction('forwarder','stop')">STOP</button></div>
+  <div><b>CONSOLE</b><span class="state good">RUNNING</span></div>
+</section>
 
-    <section class="grid">
-      <article class="card" id="card-router">
-        <div class="card-head">
-          <div>
-            <span class="label">01</span>
-            <h2>Router</h2>
-          </div>
-          <span class="badge" id="router-badge">OFFLINE</span>
-        </div>
-        <div class="metrics">
-          <div><span>STATE</span><strong id="router-state">--</strong></div>
-          <div><span>PID</span><strong id="router-pid">--</strong></div>
-          <div><span>UPTIME</span><strong id="router-uptime">--</strong></div>
-        </div>
-        <div class="actions">
-          <button onclick="serviceAction('router','start')">START</button>
-          <button onclick="serviceAction('router','stop')">STOP</button>
-          <button onclick="serviceAction('router','restart')">RESTART</button>
-          <button class="ghost" onclick="togglePanel('router-panel')">DETAILS</button>
-        </div>
-        <div class="panel" id="router-panel">
-          <div class="panel-title">Router health</div>
-          <pre id="router-detail">Waiting...</pre>
-          <div id="router-sources"></div>
-        </div>
-      </article>
+<section class="router-head">
+  <div><div class="eyebrow">DATA ROUTER</div><h2>Input Sources</h2><p id="router-summary">Loading...</p></div>
+  <button onclick="refresh()">REFRESH</button>
+</section>
 
-      <article class="card" id="card-parser">
-        <div class="card-head">
-          <div>
-            <span class="label">02</span>
-            <h2>Parser</h2>
-          </div>
-          <span class="badge" id="parser-badge">OFFLINE</span>
-        </div>
-        <div class="metrics">
-          <div><span>STATE</span><strong id="parser-state">--</strong></div>
-          <div><span>PID</span><strong id="parser-pid">--</strong></div>
-          <div><span>UPTIME</span><strong id="parser-uptime">--</strong></div>
-        </div>
-        <div class="actions">
-          <button onclick="serviceAction('parser','start')">START</button>
-          <button onclick="serviceAction('parser','stop')">STOP</button>
-          <button onclick="serviceAction('parser','restart')">RESTART</button>
-          <button class="ghost" onclick="togglePanel('parser-panel')">DETAILS</button>
-        </div>
-        <div class="panel" id="parser-panel">
-          <div class="panel-title">Parser health</div>
-          <pre id="parser-detail">Waiting...</pre>
-        </div>
-      </article>
+<section id="sources" class="sources"></section>
 
-      <article class="card" id="card-forwarder">
-        <div class="card-head">
-          <div>
-            <span class="label">03</span>
-            <h2>Forwarder</h2>
-          </div>
-          <span class="badge" id="forwarder-badge">OFFLINE</span>
-        </div>
-        <div class="metrics">
-          <div><span>STATE</span><strong id="forwarder-state">--</strong></div>
-          <div><span>PID</span><strong id="forwarder-pid">--</strong></div>
-          <div><span>UPTIME</span><strong id="forwarder-uptime">--</strong></div>
-        </div>
-        <div class="actions">
-          <button onclick="serviceAction('forwarder','start')">START</button>
-          <button onclick="serviceAction('forwarder','stop')">STOP</button>
-          <button onclick="serviceAction('forwarder','restart')">RESTART</button>
-          <button class="ghost" onclick="togglePanel('forwarder-panel')">DETAILS</button>
-        </div>
-        <div class="panel" id="forwarder-panel">
-          <div class="panel-title">Forwarder health</div>
-          <pre id="forwarder-detail">Waiting...</pre>
-        </div>
-      </article>
+<section class="router-status">
+  <div><div class="eyebrow">LIVE STATUS</div><pre id="router-status">Waiting for Router...</pre></div>
+</section>
 
-      <article class="card reference-card" id="card-reference">
-        <div class="card-head">
-          <div>
-            <span class="label">04</span>
-            <h2>Reference DB</h2>
-          </div>
-          <span class="badge" id="reference-badge">CHECKING</span>
-        </div>
-        <div class="ref-summary">
-          <div><span>WRS</span><strong id="wrs-state">--</strong></div>
-          <div><span>PANS</span><strong id="pans-state">--</strong></div>
-          <div><span>NSC</span><strong id="nsc-state">--</strong></div>
-        </div>
-        <div class="actions">
-          <button class="ghost" onclick="togglePanel('reference-panel')">MANAGE</button>
-          <button onclick="referenceRefresh()">CHECK</button>
-        </div>
-        <div class="panel" id="reference-panel">
-          <div id="reference-list"></div>
-        </div>
-      </article>
-    </section>
-
-    <footer>
-      <span>LOCAL / OFFLINE OPERATOR CONSOLE</span>
-      <span id="message">Ready</span>
-    </footer>
-  </main>
-  <script src="/static/app.js"></script>
+<footer><span id="message">Ready</span><span>Services are independent processes</span></footer>
+</main>
+<script src="/static/app.js"></script>
 </body>
 </html>
