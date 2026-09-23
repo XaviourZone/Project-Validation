@@ -111,22 +111,22 @@ def parse_payload(text):
         except Exception as e:log.warning("Rejected NMEA: %s",e)
     return out
 
-def find(conn,source,table,field,value,order):
+def find(conn,source,table,field,value,order,conn_record=None):
     for method in order:
         f={"MMSI":"MMSI","IMO":"IMO","CALLSIGN":"CALL_SIGN","VESSEL_NAME":"VESSEL_NAME","PANS_IMO":"IMONumber","PANS_MMSI":"MMSINumber","PANS_CALLSIGN":"CallSign","PANS_NAME":"VesselName","NSC_MMSI":"ID_MMSI","NSC_IMO":"ID_IMO","NSC_CALLSIGN":"ID_CALLSIGN","NSC_NAME":"VESSEL_NAME"}[method]
         v=value
-        if method=="IMO":v=conn._current_record.get("id.imo")
-        if method=="MMSI":v=conn._current_record.get("id.mmsi")
-        if method=="CALLSIGN":v=conn._current_record.get("id.callsign")
-        if method=="VESSEL_NAME":v=conn._current_record.get("vessel.name")
-        if method=="PANS_IMO":v=conn._current_record.get("id.imo")
-        if method=="PANS_MMSI":v=conn._current_record.get("id.mmsi")
-        if method=="PANS_CALLSIGN":v=conn._current_record.get("id.callsign")
-        if method=="PANS_NAME":v=conn._current_record.get("vessel.name")
-        if method=="NSC_MMSI":v=conn._current_record.get("id.mmsi")
-        if method=="NSC_IMO":v=conn._current_record.get("id.imo")
-        if method=="NSC_CALLSIGN":v=conn._current_record.get("id.callsign")
-        if method=="NSC_NAME":v=conn._current_record.get("vessel.name")
+        if method=="IMO":v=conn_record.get("id.imo")
+        if method=="MMSI":v=conn_record.get("id.mmsi")
+        if method=="CALLSIGN":v=conn_record.get("id.callsign")
+        if method=="VESSEL_NAME":v=conn_record.get("vessel.name")
+        if method=="PANS_IMO":v=conn_record.get("id.imo")
+        if method=="PANS_MMSI":v=conn_record.get("id.mmsi")
+        if method=="PANS_CALLSIGN":v=conn_record.get("id.callsign")
+        if method=="PANS_NAME":v=conn_record.get("vessel.name")
+        if method=="NSC_MMSI":v=conn_record.get("id.mmsi")
+        if method=="NSC_IMO":v=conn_record.get("id.imo")
+        if method=="NSC_CALLSIGN":v=conn_record.get("id.callsign")
+        if method=="NSC_NAME":v=conn_record.get("vessel.name")
         if v in (None,""):continue
         rows=ref_rows(conn,source,table,f,v,2)
         if len(rows)==1:return rows[0]["data"],method
@@ -134,10 +134,9 @@ def find(conn,source,table,field,value,order):
     return None,None
 
 def enrich(conn,n):
-    conn._current_record=n
-    wrs,wm=find(conn,"WRS","wrs_datasets_vessels","",None,WRS_MATCH)
-    pans,pm=find(conn,"PANS","pans_vespro","",None,("PANS_IMO","PANS_MMSI","PANS_CALLSIGN","PANS_NAME"))
-    nsc,nm=find(conn,"NSC","nsc_vessels","",None,("NSC_MMSI","NSC_IMO","NSC_CALLSIGN","NSC_NAME"))
+    wrs,wm=find(conn,"WRS","wrs_datasets_vessels","",None,WRS_MATCH,n)
+    pans,pm=find(conn,"PANS","pans_vespro","",None,("PANS_IMO","PANS_MMSI","PANS_CALLSIGN","PANS_NAME"),n)
+    nsc,nm=find(conn,"NSC","nsc_vessels","",None,("NSC_MMSI","NSC_IMO","NSC_CALLSIGN","NSC_NAME"),n)
     prov={}
     def setif(k,*vals):
         if n.get(k) in (None,""):
