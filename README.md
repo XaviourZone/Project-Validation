@@ -83,66 +83,14 @@ The Console can load and **update**:
 - **PANS** from an operator-selected folder. XML files are discovered recursively from that folder using the established VesselProfile/VoyageRegistration/VesselCallNumber/BerthManagement mappings.
 - **NSC** from an operator-selected folder containing both `NSC_EAST*.csv` and `NSC_WEST*.csv` data (or EAST/WEST subfolders). Both regional datasets are loaded into `nsc_vessels` with `SOURCE_REGION=EAST/WEST`. The Console validates that both regions are present before loading.
 
-Reference loading is intentionally blocked while Parser is reachable. Stop Parser first, load/update the store, then start Parser. This prevents replacing an open RocksDB directory and prevents stale in-process reference-cache results. Re-running **UPDATE ROCKSDB** always reads the current files in the mapped source folder; no manual deletion of the old RocksDB store is required.
-## Legacy migration
+Reference updates follow this operator workflow:
 
-\`\`\`bash
-./migration/run_migration.sh
-\`\`\`
+**Mapped source folder → Validate → Stop Parser → Load/Update RocksDB → Start Parser → new reference data used by enrichment.**
 
-SQLite remains restricted to this one-time migration utility.
+The **UPDATE ROCKSDB** action automates this sequence when Parser was started by the Console: it validates the selected source, stops Parser, rebuilds the selected reference store from the current source files, atomically replaces the store, and starts Parser again. If Parser is running outside the Console, the operation stops with a clear instruction to stop Parser manually first. If Parser was already stopped, the update leaves it stopped.
 
-## Preflight
+- **WRS:** select one root folder containing `Datasets/` and either `Decode/` or `Decode files/`. Every current CSV below those folders is read on each update.
+- **PANS:** select a root folder; XML files are discovered recursively and loaded using the established PANS root mappings.
+- **NSC:** select a root folder containing both `NSC_EAST*.csv` and `NSC_WEST*.csv`, or EAST/WEST subfolders. Both regions are required and are loaded with `SOURCE_REGION=EAST/WEST`.
 
-\`\`\`bash
-./scripts/preflight.sh
-\`\`\`
-
-
-## Offline dependency bundle
-
-The repository uses a local virtual environment at `.venv` and a local wheelhouse at `offline/wheels`.
-
-### Internet-connected preparation machine
-
-Use the same OS, CPU architecture and Python major/minor version as the offline target:
-
-```bash
-python scripts/setup_dependencies.py --download
-```
-
-Windows:
-
-```bat
-py -3 scripts\setup_dependencies.py --download
-```
-
-This downloads the complete dependency set, including transitive dependencies, into `offline/wheels/`.
-
-Copy the complete `offline/wheels` directory to the offline server. Do not rely on packages already installed on the preparation machine.
-
-### Offline server
-
-After copying the repository and `offline/wheels`:
-
-```bash
-./scripts/start_all.sh
-```
-
-Windows:
-
-```bat
-scripts\start_all.bat
-```
-
-The launcher automatically creates `.venv`, installs the required packages from `offline/wheels` using `--no-index`, and starts Router, Parser, Forwarder and Console using that same local Python environment.
-
-No Internet is required after the wheelhouse has been prepared.
-
-For installation without starting services:
-
-```bash
-python scripts/setup_dependencies.py --install
-```
-
-The RocksDB binding is the approved `amulet-rocksdb` package and exposes the Python `rocksdb` module used by the application. Its wheel is platform/Python-version specific, so the wheelhouse should be prepared for the same target environment. citeturn0search4turn1search0
+No manual deletion of the existing RocksDB reference store is required.
