@@ -1,0 +1,13 @@
+{
+  "host": "127.0.0.1",
+  "port": 5432,
+  "database": "validation",
+  "user": "validation",
+  "password": "",
+  "web_host": "127.0.0.1",
+  "web_port": 5055,
+  "pans_folder": "",
+  "poll_seconds": 2,
+  "pg_ctl": "",
+  "pg_data": ""
+}
