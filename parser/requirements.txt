@@ -1,1 +1,2 @@
-# Install the platform-compatible offline RocksDB Python binding.\npython-rocksdb\n
+# Offline RocksDB Python binding for CPython 3.11/3.12/3.13.
+amulet-rocksdb>=1.0.5,<2

@@ -1,30 +1,23 @@
-# Project-Validation Architecture
+# Project-Validation architecture
 
-Router, Parser, and Forwarder are independently executable applications.
+Project-Validation has three independent runtime services:
 
-## Data flow
+    DATA SOURCES -> ROUTER -> PARSER -> XML SPOOL -> FORWARDER -> DOWNSTREAM
 
-INPUT SOURCES
--> ROUTER
--> PARSER INPUT SPOOL
--> PARSER
-   -> Decode
-   -> Normalize
-   -> Validate
-   -> Correlate
-   -> WRS RocksDB
-   -> PANS RocksDB
-   -> NSC RocksDB
-   -> Fusion
-   -> XML
--> XML SPOOL
--> FORWARDER
--> DESTINATION
+Router owns ingestion and routing. Parser owns parsing, decoding, normalization, validation, correlation, reference enrichment, fusion and XML generation. Forwarder owns downstream delivery.
 
-Reference databases are Parser-owned runtime assets, not separate services.
+## Storage rule
 
-Router performs input discovery and routing only.
-Parser owns parsing, decoding, normalization, validation, correlation, enrichment, fusion and XML generation.
-Forwarder owns output delivery and retry.
+**RocksDB is the only runtime database engine. SQLite is not part of the target runtime.**
 
-Runtime processing must not use direct Python calls between the three services.
+Persistent stores are isolated by responsibility:
+
+- Router state: router/state
+- Parser AIS state: parser/state/ais
+- Parser track/reference state: parser/state/track
+- Parser WRS reference: parser/reference/wrs
+- Parser PANS reference: parser/reference/pans
+- Parser NSC reference: parser/reference/nsc
+- Forwarder delivery state: forwarder/state/delivery
+
+The one-time legacy migration utility may read SQLite source files solely to convert them to RocksDB. Services do not depend on SQLite.
