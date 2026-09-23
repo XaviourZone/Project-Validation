@@ -6,7 +6,7 @@ async function api(path, options={}){
   if(!r.ok) throw new Error(d.error||d.message||"Request failed");
   return d;
 }
-function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",""":"&quot;","'":"&#39;"}[c]));}
+function esc(v){return String(v??"").replace(/[&<>"\']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","\"":"&quot;","'":"&#39;"}[c]));}
 function msg(v){document.getElementById("message").textContent=v;}
 function serviceState(x){return x?.health?.reachable?"RUNNING":(x?.state||"STOPPED");}
 
