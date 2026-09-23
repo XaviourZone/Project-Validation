@@ -1,10 +1,10 @@
-"""Offline UN/LOCODE destination resolver.
+"""Offline UN/LOCODE resolver backed by the Validation PostgreSQL reference DB.
 
-The bundled JSON dictionary is generated from the UNECE/UNCEFACT UN/LOCODE
-2025-1 vocabulary. Runtime lookup is local/offline and never calls a service.
+If PostgreSQL is unavailable, the existing bundled JSON remains a safe fallback
+for compatibility with older deployments.
 """
-
 import json
+import os
 from pathlib import Path
 import unicodedata
 from typing import Any, Dict, Optional
@@ -12,73 +12,59 @@ from typing import Any, Dict, Optional
 _CACHE: Optional[Dict[str, str]] = None
 _NAME_CACHE: Optional[Dict[str, str]] = None
 
-
 def _default_path() -> Path:
     root = Path(__file__).resolve().parents[2]
     return root / "config" / "unlocode.json"
 
-
-def _load() -> Dict[str, str]:
-    global _CACHE, _NAME_CACHE
-    if _CACHE is None:
-        path = _default_path()
-        try:
-            with path.open("r", encoding="utf-8") as handle:
-                data = json.load(handle)
-            if not isinstance(data, dict):
-                data = {}
-            _CACHE = {
-                str(code).strip().upper().replace(" ", ""): str(name).strip()
-                for code, name in data.items()
-                if str(code).strip() and str(name).strip()
-            }
-            # Build a reverse name index once so a destination that is already
-            # a human-readable UN/LOCODE name can also be canonicalised.
-            _NAME_CACHE = {}
-            for code, name in _CACHE.items():
-                key = _normalise_name(name)
-                if key and key not in _NAME_CACHE:
-                    _NAME_CACHE[key] = name
-        except FileNotFoundError:
-            _CACHE = {}
-            _NAME_CACHE = {}
-        except Exception:
-            _CACHE = {}
-            _NAME_CACHE = {}
-    return _CACHE
-
-
 def _normalise_name(value: Any) -> str:
-    text = str(value or "").strip()
-    text = unicodedata.normalize("NFKD", text)
+    text = unicodedata.normalize("NFKD", str(value or "").strip())
     text = "".join(ch for ch in text if not unicodedata.combining(ch))
     return " ".join(text.upper().split())
 
+def _load_json():
+    global _CACHE, _NAME_CACHE
+    try:
+        data=json.loads(_default_path().read_text(encoding="utf-8"))
+        if not isinstance(data,dict): data={}
+    except Exception:
+        data={}
+    _CACHE={str(k).strip().upper().replace(" ",""):str(v).strip() for k,v in data.items() if str(k).strip() and str(v).strip()}
+    _NAME_CACHE={}
+    for code,name in _CACHE.items():
+        _NAME_CACHE.setdefault(_normalise_name(name),name)
+
+def _load():
+    global _CACHE, _NAME_CACHE
+    if _CACHE is not None: return
+    _CACHE={}; _NAME_CACHE={}
+    try:
+        import psycopg
+        cfg={
+            "host":os.environ.get("VALIDATION_DB_HOST","127.0.0.1"),
+            "port":int(os.environ.get("VALIDATION_DB_PORT","5432")),
+            "dbname":os.environ.get("VALIDATION_DB_NAME","validation"),
+            "user":os.environ.get("VALIDATION_DB_USER","validation"),
+            "password":os.environ.get("VALIDATION_DB_PASSWORD","CHANGE_ME"),
+        }
+        with psycopg.connect(**cfg) as conn:
+            with conn.cursor() as cur:
+                cur.execute("SELECT code,name FROM unlocode_records")
+                for code,name in cur.fetchall():
+                    if code and name:
+                        c=str(code).strip().upper().replace(" ","")
+                        _CACHE[c]=str(name).strip()
+                        _NAME_CACHE.setdefault(_normalise_name(name),str(name).strip())
+        if _CACHE: return
+    except Exception:
+        pass
+    _load_json()
 
 def resolve_destination(value: Any) -> Any:
-    """Convert a 5-character UN/LOCODE to its local dictionary name.
-
-    Values that are not valid-looking UN/LOCODEs or are not present in the
-    dictionary are returned unchanged. Existing human-readable destinations
-    are therefore preserved.
-    """
-    if value is None:
-        return value
-
-    text = str(value).strip()
-    if not text:
-        return value
-
-    code = "".join(text.upper().split())
-    mapping = _load()
-
-    # First handle a five-character UN/LOCODE, with or without the
-    # conventional display space (for example ADALV or AD ALV).
-    if len(code) == 5 and code[:2].isalpha() and code[2:].isalnum():
-        return mapping.get(code, value)
-
-    # If the incoming value is already a destination name, canonicalise it
-    # against the same offline UN/LOCODE dictionary. Unknown/free-text
-    # destinations remain unchanged.
-    name_map = _NAME_CACHE or {}
-    return name_map.get(_normalise_name(text), value)
+    if value is None: return value
+    text=str(value).strip()
+    if not text: return value
+    _load()
+    code="".join(text.upper().split())
+    if len(code)==5 and code[:2].isalpha() and code[2:].isalnum():
+        return _CACHE.get(code,value)
+    return (_NAME_CACHE or {}).get(_normalise_name(text),value)
