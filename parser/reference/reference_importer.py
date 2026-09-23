@@ -69,6 +69,16 @@ def pans_table(root_tag: str):
     return {"VesselProfile":"pans_vespro","VoyageRegistration":"pans_calinf",
             "VesselCallNumber":"pans_calinv","BerthManagement":"pans_berman"}.get(root_tag)
 
+def nsc_region(path: Path) -> str:
+    """Resolve NSC EAST/WEST from the folder name or NSC_EAST/NSC_WEST filename."""
+    for part in reversed(path.parts):
+        token = re.sub(r"[^A-Za-z0-9]+", "_", part).strip("_").upper()
+        if token in {"EAST", "NSC_EAST"} or token.startswith("NSC_EAST_"):
+            return "EAST"
+        if token in {"WEST", "NSC_WEST"} or token.startswith("NSC_WEST_"):
+            return "WEST"
+    return "UNKNOWN"
+
 def put_rows(store, namespace: str, rows: Iterable[dict[str, Any]], source_hash: str) -> int:
     batch, count = [], 0
     for index, row in enumerate(rows):
@@ -102,7 +112,7 @@ def _build_csv_store(name, db_name, source, target, files):
             fh = file_hash(path); rows = csv_rows(path)
             table = wrs_table(path.name, is_decode) if name == "WRS" else "nsc_vessels"
             if name == "NSC":
-                region = next((p.upper() for p in path.parts if p.upper() in {"EAST","WEST"}), "UNKNOWN")
+                region = nsc_region(path)
                 rows = (dict(row, SOURCE_REGION=region) for row in rows)
             loaded = put_rows(store, f"{db_name}/{table}", rows, fh)
             manifest["files"].append({"file":str(path),"sha256":fh,"rows":loaded,"table":table})
@@ -144,9 +154,24 @@ def import_pans(source: Path, target: Path):
         shutil.rmtree(build,ignore_errors=True); raise
 
 def import_nsc(source: Path, target: Path):
-    files=sorted(source.rglob("*.csv"))
-    if not files: raise ValueError("No NSC CSV files found in the selected source folder")
-    return _build_csv_store("NSC","nsc",source,target,[(p,False) for p in files])
+    files = sorted(source.rglob("*.csv"))
+    if not files:
+        raise ValueError("No NSC CSV files found in the selected source folder")
+
+    # The operator source is expected to contain both regional NSC inputs.
+    # Accept either files named NSC_EAST/NSC_WEST (with any CSV suffix) or
+    # EAST/WEST subfolders. Unrelated CSVs are not imported as NSC data.
+    regional = [(p, nsc_region(p)) for p in files]
+    east = [p for p, region in regional if region == "EAST"]
+    west = [p for p, region in regional if region == "WEST"]
+    if not east or not west:
+        raise ValueError(
+            "NSC source must contain both NSC_EAST and NSC_WEST CSV data "
+            "(or EAST/WEST folders)."
+        )
+
+    selected = [(p, False) for p in east + west]
+    return _build_csv_store("NSC", "nsc", source, target, selected)
 
 def import_reference(name: str, source_folder: str|Path, target: str|Path):
     name=str(name).upper().strip(); source=Path(source_folder).expanduser().resolve(); target=Path(target).expanduser().resolve()
