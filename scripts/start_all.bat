@@ -4,6 +4,12 @@ set "ROOT=%~dp0.."
 for %%I in ("%ROOT%") do set "ROOT=%%~fI"
 set "VALIDATION_HOME=%ROOT%"
 if defined PYTHONPATH (set "PYTHONPATH=%ROOT%;%PYTHONPATH%") else (set "PYTHONPATH=%ROOT%")
+cd /d "%ROOT%"
+echo VALIDATION DEPENDENCY BOOTSTRAP
+py -3 "%ROOT%\scripts\setup_dependencies.py"
+if errorlevel 1 exit /b 1
+set "PY=%ROOT%\.venv\Scripts\python.exe"
+if not exist "%PY%" exit /b 1
 if not exist "%ROOT%\logs" mkdir "%ROOT%\logs"
 if not exist "%ROOT%\run" mkdir "%ROOT%\run"
 if not exist "%ROOT%\DATA_INFLOW\SAIS_IOR" mkdir "%ROOT%\DATA_INFLOW\SAIS_IOR"
@@ -17,15 +23,15 @@ if not exist "%ROOT%\router\state" mkdir "%ROOT%\router\state"
 if not exist "%ROOT%\parser\state" mkdir "%ROOT%\parser\state"
 if not exist "%ROOT%\parser\reference" mkdir "%ROOT%\parser\reference"
 if not exist "%ROOT%\forwarder\state" mkdir "%ROOT%\forwarder\state"
-cd /d "%ROOT%"
-start "VALIDATION ROUTER" cmd /k "cd /d ""%ROOT%"" && set ""VALIDATION_HOME=%ROOT%"" && set ""PYTHONPATH=%PYTHONPATH%"" && py -3 -m router.app.main --config router/config/sources.yaml"
-start "VALIDATION PARSER" cmd /k "cd /d ""%ROOT%"" && set ""VALIDATION_HOME=%ROOT%"" && set ""PYTHONPATH=%PYTHONPATH%"" && py -3 -m parser.app.main --config parser/config/parser.yaml"
-start "VALIDATION FORWARDER" cmd /k "cd /d ""%ROOT%"" && set ""VALIDATION_HOME=%ROOT%"" && set ""PYTHONPATH=%PYTHONPATH%"" && py -3 -m forwarder.app.main --config forwarder/config/forwarder.yaml"
-start "VALIDATION CONSOLE" cmd /k "cd /d ""%ROOT%"" && set ""VALIDATION_HOME=%ROOT%"" && set ""PYTHONPATH=%PYTHONPATH%"" && py -3 -m console.app.main"
-echo.
-echo VALIDATION started: Router, Parser, Forwarder and Console are separate processes.
+start "VALIDATION ROUTER" cmd /k "cd /d ""%ROOT%"" && set ""VALIDATION_HOME=%ROOT%"" && set ""PYTHONPATH=%PYTHONPATH%"" && ""%PY%"" -m router.app.main --config router/config/sources.yaml"
+start "VALIDATION PARSER" cmd /k "cd /d ""%ROOT%"" && set ""VALIDATION_HOME=%ROOT%"" && set ""PYTHONPATH=%PYTHONPATH%"" && ""%PY%"" -m parser.app.main --config parser/config/parser.yaml"
+start "VALIDATION FORWARDER" cmd /k "cd /d ""%ROOT%"" && set ""VALIDATION_HOME=%ROOT%"" && set ""PYTHONPATH=%PYTHONPATH%"" && ""%PY%"" -m forwarder.app.main --config forwarder/config/forwarder.yaml"
+start "VALIDATION CONSOLE" cmd /k "cd /d ""%ROOT%"" && set ""VALIDATION_HOME=%ROOT%"" && set ""PYTHONPATH=%PYTHONPATH%"" && ""%PY%"" -m console.app.main"
+echo VALIDATION SYSTEM STARTED
 echo Console: http://127.0.0.1:8080
 echo Router: http://127.0.0.1:18080
 echo Parser: http://127.0.0.1:18081
 echo Forwarder: http://127.0.0.1:18082
+echo Python: %PY%
+echo Wheelhouse: %ROOT%\offline\wheels
 endlocal
