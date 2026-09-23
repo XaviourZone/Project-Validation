@@ -1,3 +1,3 @@
 #!/usr/bin/env bash
 set -euo pipefail
-exec "$(cd "$(dirname "\${BASH_SOURCE[0]}")" && pwd)/start_all.sh"
+exec "$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/start_all.sh"
