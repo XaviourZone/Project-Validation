@@ -10,6 +10,7 @@ Provides a single ReferenceDB object that:
 
 import copy
 import logging
+import sqlite3
 from .rocks_sql_compat import RocksDBReferenceError
 import threading
 from collections import OrderedDict
@@ -160,7 +161,18 @@ class ReferenceDB:
         self._pans_conn = self._open(self._pans_path, "PANS")
         self._nsc_conn  = self._open(self._nsc_path,  "NSC")
 
-    def _open(self, path: Path, label: str):\n        if not path.exists():\n            log.warning(f"{label} RocksDB reference store not found at {path}")\n            return None\n        try:\n            from .rocks_sql_compat import RocksSQLCompatConnection\n            return RocksSQLCompatConnection(path, label.lower())\n        except Exception as e:\n            log.error(f"Cannot open {label} RocksDB reference store: {e}")\n            return None\n\n    def resolve(
+    def _open(self, path: Path, label: str):
+        if not path.exists():
+            log.warning(f"{label} RocksDB reference store not found at {path}")
+            return None
+        try:
+            from .rocks_sql_compat import RocksSQLCompatConnection
+            return RocksSQLCompatConnection(path, label.lower())
+        except Exception as e:
+            log.error(f"Cannot open {label} RocksDB reference store: {e}")
+            return None
+
+    def resolve(
         self,
         mmsi: Optional[int],
         imo:  Optional[int],
