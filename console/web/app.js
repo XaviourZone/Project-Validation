@@ -82,6 +82,7 @@ async function refresh(){
     document.getElementById("clock").textContent=d.time.split(" ")[1]||d.time;
     document.getElementById("router-status").textContent=JSON.stringify(d.router,null,2);
     await loadSources();
+    await loadReferenceStatus();
   }catch(e){msg(e.message);}
 }
 setInterval(refresh,3000); refresh();
