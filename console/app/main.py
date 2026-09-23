@@ -24,6 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 import yaml
+from parser.reference.reference_importer import import_reference
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = ROOT / "console" / "config" / "console.yaml"
@@ -389,8 +390,17 @@ class ReferenceManager:
             if source and source.is_dir():
                 for folder_name in item.get("required_folders", []):
                     child = self._find_child(source, str(folder_name))
+                    if name.upper() == "WRS" and str(folder_name).casefold() == "decode":
+                        child = child or self._find_child(source, "Decode files")
                     required[str(folder_name)] = bool(child and child.is_dir())
-            manifests = bool(store.is_dir() and any(store.glob("MANIFEST*")))
+            manifest_path = store / "REFERENCE_MANIFEST.json"
+            manifest = {}
+            if manifest_path.is_file():
+                try:
+                    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+                except Exception:
+                    manifest = {}
+            manifests = bool(store.is_dir() and (manifest_path.is_file() or any(store.glob("MANIFEST*"))))
             entries.append({
                 "name": name,
                 "source_folder": str(source) if source else "",
@@ -398,6 +408,10 @@ class ReferenceManager:
                 "required": required,
                 "store_path": str(store),
                 "store_ready": manifests,
+                "rows": int(manifest.get("rows", 0) or 0),
+                "tables": manifest.get("tables", {}),
+                "files_loaded": len(manifest.get("files", []) or []),
+                "last_import": manifest.get("created_at"),
                 "status": "READY" if manifests else ("SOURCE READY" if source and source.is_dir() and all(required.values()) else "NOT CONFIGURED"),
             })
         return {"databases": entries}
@@ -412,6 +426,33 @@ class ReferenceManager:
         cfg["reference"][name]["source_folder"] = str(path)
         save_yaml(CONFIG_PATH, cfg)
         return self.status()
+
+    def load(self, name: str) -> dict[str, Any]:
+        cfg = load_yaml(CONFIG_PATH)
+        if name not in (cfg.get("reference") or {}):
+            raise ValueError(f"Unknown reference database: {name}")
+        entry = cfg["reference"][name] or {}
+        source = str(entry.get("source_folder", "")).strip()
+        if not source:
+            raise ValueError(f"{name} source folder is not configured")
+        source_path = Path(source).expanduser().resolve()
+        if not source_path.is_dir():
+            raise ValueError(f"Reference source folder does not exist: {source_path}")
+        if self._parser_health().get("reachable"):
+            raise ValueError("Stop Parser before loading a reference database, then load it and start Parser again.")
+        target = Path(str(entry.get("store_path", "")))
+        if not target.is_absolute():
+            target = ROOT / target
+        result = import_reference(name, source_path, target)
+        return {"success": True, "database": name, "manifest": result, "status": self.status()}
+
+    @staticmethod
+    def _parser_health() -> dict[str, Any]:
+        try:
+            with urllib.request.urlopen("http://127.0.0.1:18081/health", timeout=1.0) as response:
+                return json.loads(response.read().decode("utf-8"))
+        except Exception:
+            return {"reachable": False}
 
 
 class Console:
@@ -513,6 +554,9 @@ class Handler(BaseHTTPRequestHandler):
                     if name not in CONSOLE.services:
                         return self._json({"error": "unknown service"}, 404)
                     return self._json(getattr(CONSOLE.services[name], action)())
+            if path == "/api/reference/load":
+                name = str(body.get("name", "")).strip()
+                return self._json(CONSOLE.reference.load(name))
             if path == "/api/reference/validate":
                 name = str(body.get("name", ""))
                 status = CONSOLE.reference.status()
