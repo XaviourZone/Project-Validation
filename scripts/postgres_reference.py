@@ -56,29 +56,38 @@ class PostgresReferenceDB:
     def resolve(self,mmsi=None,imo=None,callsign=None,vessel_name=None):
         ck=(_int(mmsi),_int(imo),(str(callsign).strip().upper() if callsign else None),(str(vessel_name).strip().upper() if vessel_name else None))
         with self.lock:
-            if ck in self.cache: return self.cache[ck]
+            if ck in self.cache:
+                return self.cache[ck]
             rows=self._rows(*ck)
             if not rows:
                 ctx=VesselContext(); self.cache[ck]=ctx; return ctx
-            # Identity ambiguity is evaluated within each reference source.
-            # WRS/PANS/NSC naturally have different entity keys for the same
-            # vessel, so different keys across sources are not an ambiguity.
-            selected=[]
-            keys=set()
-            by_source={}
-            for row in rows:
-                by_source.setdefault(str(row[0]).upper(), []).append(row)
-            for source, source_rows in by_source.items():
-                source_keys={str(x[2]) for x in source_rows if x[2]}
-                if len(source_keys)==1:
-                    selected.extend(source_rows)
-                    keys.update(source_keys)
-                elif len(source_keys)>1:
-                    # Do not guess between conflicting records from the same source.
-                    continue
+
+            # Preserve the established match priority per reference source:
+            # MMSI -> IMO -> CALLSIGN -> VESSEL NAME. A source is rejected only
+            # when that identity is ambiguous within that source.
+            selected=[]; keys=set()
+            for source in ("WRS","PANS","NSC"):
+                source_rows=[r for r in rows if str(r[0]).upper()==source]
+                chosen=None
+                for value_index,value in ((3,ck[0]),(4,ck[1]),(5,ck[2]),(6,ck[3])):
+                    if value in (None,""): continue
+                    candidates=[]
+                    for row in source_rows:
+                        actual=row[value_index]
+                        if actual is not None and str(actual).strip().upper()==str(value).strip().upper():
+                            candidates.append(row)
+                    source_keys={str(x[2]) for x in candidates if x[2]}
+                    if len(source_keys)==1:
+                        chosen=candidates; break
+                    if len(source_keys)>1:
+                        candidates=[]
+                if chosen:
+                    selected.extend(chosen)
+                    keys.update(str(x[2]) for x in chosen if x[2])
+
             if not selected:
                 return VesselContext()
-            rows = selected + self._related(keys)
+            rows=selected+self._related(keys)
             ctx=VesselContext()
             for source,dataset,entity,payload in rows:
                 p=dict(payload or {}); src=str(source).upper(); ds=str(dataset).lower()
@@ -86,8 +95,10 @@ class PostgresReferenceDB:
                 elif src=="PANS": self._pans(ctx,p,ds)
                 elif src=="NSC": self._nsc(ctx,p)
             self.cache[ck]=ctx
-            if len(self.cache)>self.cache_max: self.cache.pop(next(iter(self.cache)))
+            if len(self.cache)>self.cache_max:
+                self.cache.pop(next(iter(self.cache)))
             return ctx
+
 
     def _wrs(self,c,p,e,ds):
         if "vessels" in ds:
