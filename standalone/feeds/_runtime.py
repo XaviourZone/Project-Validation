@@ -86,3 +86,23 @@ def update_vessel_state(conn,mmsi:int,values:dict,timestamp=None,source:str=""):
                     ON CONFLICT(mmsi) DO UPDATE SET state_values=EXCLUDED.state_values,last_timestamp=EXCLUDED.last_timestamp,last_source=EXCLUDED.last_source,updated_at=now()""",
                  (int(mmsi),json.dumps(merged,ensure_ascii=False),timestamp,source))
     return merged
+
+def load_source_mappings(conn,source_id:int):
+    return conn.execute("SELECT input_field,target_field,transformation,priority FROM field_mapping WHERE source_id=%s AND enabled=true ORDER BY priority,id",(int(source_id),)).fetchall()
+
+def apply_source_mappings(record:dict,mappings):
+    # This applies operator mappings only where the parser exposes the source field.
+    # Feed-specific parser/normalization remains authoritative for decoding.
+    for m in mappings:
+        inp=m["input_field"];target=m["target_field"]
+        if inp not in record or record.get(inp) in (None,""):continue
+        value=record.get(inp);t=(m["transformation"] or "").lower()
+        try:
+            if "integer" in t:value=int(float(value))
+            elif "float" in t:value=float(value)
+            elif "uppercase" in t:value=str(value).upper()
+            elif "string" in t:value=str(value)
+        except Exception:
+            continue
+        record[target]=value
+    return record
