@@ -24,7 +24,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 import yaml
-from parser.reference.reference_importer import import_reference
+from parser.reference.reference_importer import import_reference, nsc_region
 
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = ROOT / "console" / "config" / "console.yaml"
@@ -387,12 +387,27 @@ class ReferenceManager:
             if not store.is_absolute():
                 store = ROOT / store
             required = {}
+            source_details = {}
             if source and source.is_dir():
-                for folder_name in item.get("required_folders", []):
-                    child = self._find_child(source, str(folder_name))
-                    if name.upper() == "WRS" and str(folder_name).casefold() == "decode":
-                        child = child or self._find_child(source, "Decode files")
-                    required[str(folder_name)] = bool(child and child.is_dir())
+                if name.upper() == "WRS":
+                    for folder_name in item.get("required_folders", []):
+                        child = self._find_child(source, str(folder_name))
+                        if str(folder_name).casefold() == "decode":
+                            child = child or self._find_child(source, "Decode files")
+                        required[str(folder_name)] = bool(child and child.is_dir())
+                elif name.upper() == "NSC":
+                    csv_files = sorted(source.rglob("*.csv"))
+                    east = [p for p in csv_files if nsc_region(p) == "EAST"]
+                    west = [p for p in csv_files if nsc_region(p) == "WEST"]
+                    required["NSC_EAST"] = bool(east)
+                    required["NSC_WEST"] = bool(west)
+                    source_details["csv_files"] = len(csv_files)
+                    source_details["east_files"] = len(east)
+                    source_details["west_files"] = len(west)
+                elif name.upper() == "PANS":
+                    xml_files = sorted(source.rglob("*.xml"))
+                    required["XML_FILES"] = bool(xml_files)
+                    source_details["xml_files"] = len(xml_files)
             manifest_path = store / "REFERENCE_MANIFEST.json"
             manifest = {}
             if manifest_path.is_file():
@@ -406,13 +421,14 @@ class ReferenceManager:
                 "source_folder": str(source) if source else "",
                 "source_exists": bool(source and source.is_dir()),
                 "required": required,
+                "source_details": source_details,
                 "store_path": str(store),
                 "store_ready": manifests,
                 "rows": int(manifest.get("rows", 0) or 0),
                 "tables": manifest.get("tables", {}),
                 "files_loaded": len(manifest.get("files", []) or []),
                 "last_import": manifest.get("created_at"),
-                "status": "READY" if manifests else ("SOURCE READY" if source and source.is_dir() and all(required.values()) else "NOT CONFIGURED"),
+                "status": "READY" if manifests else ("SOURCE READY" if source and source.is_dir() and required and all(required.values()) else "NOT CONFIGURED"),
             })
         return {"databases": entries}
 
