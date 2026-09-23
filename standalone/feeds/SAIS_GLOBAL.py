@@ -38,7 +38,7 @@ def num(v,i=False):
 def valid_mmsi(v):
     x=num(v,True);return x if x and 100000000<=x<=999999999 else None
 def valid_imo(v):
-    x=num(v,True);return x if x and 1000000000<=x<=9999999999 else None
+    x=num(v,True);return x if x and 1000000<=x<=9999999 else None
 def rad(v):
     x=num(v);return math.radians(x) if x is not None else None
 def ms(v):
