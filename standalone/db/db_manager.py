@@ -242,6 +242,18 @@ def watch_pans():
 def index():
     return render_template_string(PAGE)
 
+@app.post("/api/pick-folder")
+def pick_folder():
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root=tk.Tk();root.withdraw();root.attributes("-topmost",True)
+        value=filedialog.askdirectory(title="Select folder")
+        root.destroy()
+        return jsonify({"folder":value})
+    except Exception as exc:
+        return jsonify({"folder":"","error":str(exc)}),500
+
 @app.get("/api/status")
 def status():
     try:
@@ -381,9 +393,9 @@ def search():
 PAGE = """<!doctype html><html><head><meta charset=utf-8><title>Validation DB Manager</title>
 <style>body{font-family:Arial;background:#101418;color:#eee;margin:32px}button,input,textarea{padding:8px;margin:4px}pre{background:#171d22;padding:16px;overflow:auto}.card{border:1px solid #39434c;padding:16px;margin:12px 0;border-radius:8px}textarea{width:90%;height:90px;background:#0d1114;color:#eee}</style></head>
 <body><h1>Validation — PostgreSQL Reference Manager</h1>
-<div class=card><button onclick=refresh()>Refresh</button><pre id=status></pre></div>
+<div class=card><button onclick=refresh()>Refresh</button><button onclick=pick("refpath")>Select Reference Folder</button><pre id=status></pre></div>
 <div class=card><h3>WRS / NSC import</h3><input id=refpath size=70 placeholder="Source folder path"><button onclick=imp('WRS')>Import WRS</button><button onclick=imp('NSC')>Import NSC</button></div>
-<div class=card><h3>PANS live folder</h3><input id=pans size=70 placeholder="PANS folder path"><button onclick=setPans()>Set Folder</button></div>
+<div class=card><h3>PANS live folder</h3><input id=pans size=70 placeholder="PANS folder path"><button onclick=pick("pans")>Select PANS Folder</button><button onclick=setPans()>Set Folder</button></div>
 <div class=card><h3>Source ID</h3><input id=sid placeholder="1"><input id=sname placeholder="SAIS_IOR"><input id=sdesc placeholder="description"><button onclick=addSource()>Save</button></div>
 <div class=card><h3>Field mapping</h3><input id=msid placeholder="source id"><input id=mi placeholder="input field"><input id=mt placeholder="target field"><input id=mx placeholder="transformation"><button onclick=addMapping()>Save</button></div>
 <div class=card><h3>UN/LOCODE</h3><input id=upath size=60 placeholder="CSV file path"><button onclick=importUnlocode()>Import CSV</button><br><input id=ucode placeholder="INBOM"><input id=uname placeholder="MUMBAI"><input id=ucountry placeholder="IN"><input id=uloc placeholder="BOM"><button onclick=addUnlocode()>Save</button></div>
@@ -392,7 +404,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>Validation DB Ma
 <div class=card><h3>Reference search</h3><input id=q size=50 placeholder="MMSI / IMO / name / text"><button onclick=search()>Search</button><pre id=out></pre></div>
 <script>
 async function post(url,obj){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(obj)});return r.json();}
-async function refresh(){document.getElementById('status').textContent=JSON.stringify(await (await fetch('/api/config')).json(),null,2);}
+async function pick(id){const r=await fetch("/api/pick-folder",{method:"POST"});const x=await r.json();if(x.folder)document.getElementById(id).value=x.folder;}\nasync function refresh(){document.getElementById('status').textContent=JSON.stringify(await (await fetch('/api/config')).json(),null,2);}
 async function imp(s){document.getElementById('out').textContent=JSON.stringify(await post('/api/import/'+s,{folder:document.getElementById('refpath').value}),null,2);refresh();}
 async function setPans(){document.getElementById('out').textContent=JSON.stringify(await post('/api/pans/folder',{folder:document.getElementById('pans').value}),null,2);}
 async function addSource(){document.getElementById('out').textContent=JSON.stringify(await post('/api/source',{source_id:+sid.value,source_name:sname.value,description:sdesc.value}),null,2);refresh();}
