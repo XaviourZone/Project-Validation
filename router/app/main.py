@@ -247,7 +247,7 @@ def main() -> None:
     if args.status:
         import urllib.request
         try:
-            with urllib.request.urlopen("http://127.0.0.1:8080/status", timeout=3.0) as resp:
+            with urllib.request.urlopen("http://127.0.0.1:18080/status", timeout=3.0) as resp:
                 print(resp.read().decode("utf-8"))
                 sys.exit(0)
         except Exception as e:
