@@ -23,6 +23,50 @@ function stateClass(state) {
   return "stopped";
 }
 
+async function updateRouterSources() {
+  const box = document.getElementById("router-sources");
+  if (!box) return;
+  try {
+    const data = await api("/api/router/sources");
+    box.innerHTML = (data.sources || []).map(item => {
+      const encoded = encodeURIComponent(item.name);
+      return [
+        '<div class="ref-row">',
+        '<div class="ref-row-head"><span class="ref-name">' + item.name + '</span><span class="badge ' + (item.exists ? "ready" : "stopped") + '">' + (item.exists ? "READY" : "MISSING") + '</span></div>',
+        '<div class="ref-path">' + item.folder + '</div>',
+        '<div class="ref-actions">',
+        '<button onclick="browseRouterSource(' + "'" + encoded + "'" + ')">CHANGE FOLDER</button>',
+        '</div>',
+        '</div>'
+      ].join("");
+    }).join("");
+  } catch (error) {
+    box.textContent = error.message;
+  }
+}
+
+async function browseRouterSource(encodedName) {
+  const name = decodeURIComponent(encodedName);
+  setMessage("Opening folder picker...");
+  try {
+    const picked = await api("/api/reference/browse");
+    if (!picked.success) {
+      setMessage(picked.message);
+      return;
+    }
+    await api("/api/router/source", {
+      method: "POST",
+      body: JSON.stringify({name: name, folder: picked.path})
+    });
+    setMessage(name + " folder updated; restarting Router...");
+    await api("/api/service/router/restart", {method: "POST", body: "{}"});
+    await updateRouterSources();
+    setTimeout(refresh, 800);
+  } catch (error) {
+    setMessage(error.message);
+  }
+}
+
 function updateService(name, item) {
   const badge = document.getElementById(name + "-badge");
   const state = document.getElementById(name + "-state");
@@ -93,6 +137,7 @@ async function refresh() {
       data.system === "DEGRADED" ? "var(--warn)" : "var(--muted)";
     ["router", "parser", "forwarder"].forEach(name => updateService(name, data.services[name]));
     updateReference(data.reference);
+    updateRouterSources();
     document.getElementById("clock").textContent = data.time.split(" ")[1] || data.time;
   } catch (error) {
     setMessage(error.message);
