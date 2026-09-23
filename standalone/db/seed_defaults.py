@@ -8,7 +8,7 @@ from _runtime import db_connect
 CFG=json.loads((Path(__file__).resolve().parent/"config.json").read_text(encoding="utf-8"))
 sources={1:"SAIS_IOR",2:"SAIS_GLOBAL",3:"MSIS",4:"LRIT",5:"VATMS_EAST",6:"VATMS_WEST",7:"NAIS"}
 maps={
-1:[("MMSI","id.mmsi","integer"),("IMO","id.imo","integer"),("CALLSIGN","id.callsign","string"),("VESSEL_NAME","vessel.name","string")],
+1:[("mmsi","id.mmsi","integer"),("imo","id.imo","integer"),("callsign","id.callsign","string"),("vessel_name","vessel.name","string")],
 2:[("MMSI","id.mmsi","integer"),("IMO","id.imo","integer"),("CALLSIGN","id.callsign","string"),("VESSEL_NAME","vessel.name","string")],
 3:[("mmsi","id.mmsi","integer"),("imo","id.imo","integer"),("callsign","id.callsign","string"),("ship_name","vessel.name","string"),("type_and_cargo","ais.typeAndCargo","AIS type decode")],
 4:[("mmsi","id.mmsi","integer"),("imo","id.imo","integer"),("callsign","id.callsign","string"),("vessel_name","vessel.name","string")],
