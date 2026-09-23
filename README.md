@@ -98,3 +98,52 @@ SQLite remains restricted to this one-time migration utility.
 \`\`\`bash
 ./scripts/preflight.sh
 \`\`\`
+
+
+## Offline dependency bundle
+
+The repository uses a local virtual environment at `.venv` and a local wheelhouse at `offline/wheels`.
+
+### Internet-connected preparation machine
+
+Use the same OS, CPU architecture and Python major/minor version as the offline target:
+
+```bash
+python scripts/setup_dependencies.py --download
+```
+
+Windows:
+
+```bat
+py -3 scripts\setup_dependencies.py --download
+```
+
+This downloads the complete dependency set, including transitive dependencies, into `offline/wheels/`.
+
+Copy the complete `offline/wheels` directory to the offline server. Do not rely on packages already installed on the preparation machine.
+
+### Offline server
+
+After copying the repository and `offline/wheels`:
+
+```bash
+./scripts/start_all.sh
+```
+
+Windows:
+
+```bat
+scripts\start_all.bat
+```
+
+The launcher automatically creates `.venv`, installs the required packages from `offline/wheels` using `--no-index`, and starts Router, Parser, Forwarder and Console using that same local Python environment.
+
+No Internet is required after the wheelhouse has been prepared.
+
+For installation without starting services:
+
+```bash
+python scripts/setup_dependencies.py --install
+```
+
+The RocksDB binding is the approved `amulet-rocksdb` package and exposes the Python `rocksdb` module used by the application. Its wheel is platform/Python-version specific, so the wheelhouse should be prepared for the same target environment. citeturn0search4turn1search0
