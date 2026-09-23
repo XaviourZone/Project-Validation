@@ -1,98 +1,100 @@
 # Project-Validation
 
-Offline maritime/AIS validation pipeline with three independent services that cooperate over local interfaces.
+Offline maritime/AIS validation pipeline with four independent processes that cooperate over local interfaces.
 
 ## Runtime architecture
 
 DATA_INFLOW -> **Router** -> TCP/NDJSON -> **Parser** -> XML spool -> **Forwarder**
 
-- **Router**: file/TCP ingestion, stable-file detection, hashing, duplicate protection, routing, retry, persistent lifecycle state.
+- **Router**: file/TCP ingestion, stable-file detection, hashing, duplicate protection, routing, retry and persistent lifecycle state.
 - **Parser**: SAIS/MSIS/LRIT/VATMS/NAIS parsing, AIS decoding, normalization, validation, positional spoofing detection, AIS/track state, WRS/PANS/NSC enrichment, fallback/provenance, XML generation and atomic XML spooling.
 - **Forwarder**: XML spool monitoring, persistent delivery state, retry and filesystem/SFTP delivery.
-- **RocksDB**: the only runtime database engine. Router state, parser AIS state, parser track/reference state, WRS/PANS/NSC and forwarder delivery state all use RocksDB.
-- **SQLite** exists only inside the one-time legacy migration utility to read old `.db` files.
+- **Operator Console**: local control/configuration UI. It does not own the other services.
+- **RocksDB**: the only runtime database engine. SQLite is used only by the one-time legacy migration utility.
 
-## Start all three services
+## Start the complete system
 
-From the repository root:
+Linux/RHEL:
+\`\`\`bash
+./scripts/start_all.sh
+\`\`\`
 
-```bash
-python3 -m pip install -r router/requirements.txt
-python3 -m pip install -r parser/requirements.txt
-python3 -m pip install -r forwarder/requirements.txt
+Windows:
+\`\`\`bat
+scripts\\start_all.bat
+\`\`\`
 
-./scripts/start_validation.sh
-```
+The four processes start simultaneously and remain independent. Console: \`http://127.0.0.1:8080\`, Router: \`http://127.0.0.1:18080\`, Parser: \`http://127.0.0.1:18081\`, Forwarder: \`http://127.0.0.1:18082\`.
 
-The script starts Forwarder, Parser and Router as separate processes and connects them through ports 8080/8081/8082 and parser ports 10001-10005.
+\`scripts/start_validation.sh\` and \`scripts/start_validation.bat\` are compatibility aliases to the same all-services launcher.
+
+## First end-to-end test
+
+1. Install the offline wheels from the three service requirement files.
+2. Start the system with \`./scripts/start_all.sh\`.
+3. Open the Console.
+4. In **Reference Database**, select the WRS source folder. The WRS source must contain \`Datasets\` and either \`Decode\` or \`Decode files\`.
+5. Save the source and **stop Parser**.
+6. Press **LOAD ROCKSDB** for WRS. The console builds a fresh RocksDB store and replaces \`parser/reference/wrs\` only after the import succeeds.
+7. Start Parser again. This guarantees the parser opens the newly built store with a fresh reference-resolution cache.
+8. In **Router → SAIS_IOR**, select the real source folder, enable it, ensure the file pattern includes \`*.csv\`, then APPLY and restart Router.
+9. Put an SAIS CSV/NMEA file into that source folder.
+10. Watch Router and Parser status/logs. The Router reads the complete file, sends one envelope to the SAIS endpoint, and waits for parser ACK.
+11. Parser SAIS decodes the NMEA records, then normalizes, validates, correlates/enriches against WRS/PANS/NSC, generates one XTrack XML document per successful record, validates downstream compatibility, and writes XML files to \`forwarder/spool/pending\`.
+12. Forwarder sees those XML files. Its configured D-DIODE destination is disabled by default, so the XML remains available in the pending spool for inspection.
+
+### What to inspect
+
+\`\`\`bash
+tail -f logs/router.log
+tail -f logs/parser.log
+tail -f logs/forwarder.log
+ls -lh forwarder/spool/pending/
+\`\`\`
+
+The Console Reference card shows loaded file/row counts from \`REFERENCE_MANIFEST.json\`.
 
 ## Input folders
 
-Put source files under:
+Default file sources:
 
-```text
+\`\`\`text
 DATA_INFLOW/
   SAIS_IOR/
   SAIS_GLOBAL/
   MSIS/
   LRIT/
-```
+\`\`\`
 
-VATMS East/West and NAIS TCP inputs are disabled by default for a clean local run; enable and configure them in `router/config/sources.yaml` when the actual feeds are available.
+VATMS East/West and NAIS are TCP sources and are disabled by default.
 
 ## Reference databases
 
-The runtime expects migrated RocksDB stores at:
+Runtime stores:
 
-```text
+\`\`\`text
 parser/reference/wrs
 parser/reference/pans
 parser/reference/nsc
-```
+\`\`\`
 
-The reference resolver preserves the old WRS/PANS/NSC lookup logic, match methods, field-level enrichment, fallback/provenance and bounded resolution cache. The RocksDB reference adapter supports the SQL query shapes used by that resolver without running SQLite.
+The Console can load:
+- WRS CSVs from Datasets + Decode/Decode files.
+- PANS XML files using the established VesselProfile/VoyageRegistration/VesselCallNumber/BerthManagement mappings.
+- NSC CSV files into \`nsc_vessels\`, preserving EAST/WEST source-region information when the folder path contains those names.
 
-## Migrating an existing Validation installation
+Reference loading is intentionally blocked while Parser is reachable. Stop Parser first, load the store, then start Parser. This prevents replacing an open RocksDB directory and prevents stale in-process reference-cache results.
 
-If the old `validation-docker` repository is next to this repository:
+## Legacy migration
 
-```bash
+\`\`\`bash
 ./migration/run_migration.sh
-```
+\`\`\`
 
-Or set:
+SQLite remains restricted to this one-time migration utility.
 
-```bash
-export LEGACY_VALIDATION_HOME=/path/to/old/validation-docker
-./migration/run_migration.sh
-```
+## Preflight
 
-The migration covers all seven legacy SQLite stores:
-
-1. WRS
-2. PANS
-3. NSC
-4. Router file lifecycle state
-5. Parser AIS state
-6. Parser track/reference state
-7. Forwarder delivery state
-
-The migration writes to the exact runtime RocksDB locations and emits row-count manifests. Do not start the services while a migration is running.
-
-## Smoke/preflight
-
-```bash
+\`\`\`bash
 ./scripts/preflight.sh
-```
-
-After the services are running:
-
-```bash
-python3 scripts/smoke_test.py
-```
-
-Logs are written under `logs/`.
-
-## Important deployment note
-
-Production reference DB binaries and historical runtime state are not stored in Git. The repository contains the migration and runtime logic; the actual WRS/PANS/NSC data must be supplied as the migrated RocksDB stores on the deployment machine.
+\`\`\`
