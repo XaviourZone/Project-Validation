@@ -22,7 +22,7 @@ function renderReference(d){
       : "Datasets + Decode";
   const action=d.store_ready?"UPDATE ROCKSDB":"LOAD ROCKSDB";
   const disabled=valid?"":" disabled";
-  const last=d.last_import?new Date(Number(d.last_import)*1000).toLocaleString():"Not loaded";
+  const last=d.last_import?(Number.isFinite(Number(d.last_import))?new Date(Number(d.last_import)*1000).toLocaleString():String(d.last_import)):"Not loaded";
   return '<article class="card">'+
     '<div class="card-head"><div><div class="eyebrow">REFERENCE</div><div class="card-title">'+esc(d.name)+'</div></div>'+
     '<span class="badge '+statusClass+'">'+esc(d.status)+'</span></div>'+
