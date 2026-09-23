@@ -97,15 +97,15 @@ def parse_ais(line):
         r.update(nav_status=int(b[38:42],2),sog=(int(b[50:60],2)/10 if int(b[50:60],2)!=1023 else None),longitude=sint(b[61:89])/600000,latitude=sint(b[89:116])/600000,cog=(int(b[116:128],2)/10 if int(b[116:128],2)!=3600 else None),heading=(int(b[128:137],2) if int(b[128:137],2)!=511 else None))
     elif t==5 and len(b)>=422:
         r.update(imo=int(b[40:70],2) or None,callsign=astr(b[70:112]),vessel_name=astr(b[112:232]),vessel_type=int(b[232:240],2),len_to_bow=int(b[240:249],2),len_to_stern=int(b[249:258],2),width_to_port=int(b[258:264],2),width_to_starboard=int(b[264:270],2),length=int(b[240:249],2)+int(b[249:258],2),width=int(b[258:264],2)+int(b[264:270],2),draft=int(b[294:302],2)/10 if int(b[294:302],2) else None,destination=astr(b[302:422]))
-    elif t==18 and len(b)>=133:
+    elif t==4 and len(b)>=168:\n        r.update(longitude=sint(b[79:107])/600000,latitude=sint(b[107:134])/600000)\n    elif t==9 and len(b)>=124:\n        r.update(sog=(int(b[50:60],2)/10 if int(b[50:60],2)!=1023 else None),longitude=sint(b[61:89])/600000,latitude=sint(b[89:116])/600000,cog=(int(b[116:124],2)*2 if int(b[116:124],2)!=511 else None))\n    elif t==18 and len(b)>=133:
         r.update(sog=(int(b[46:56],2)/10 if int(b[46:56],2)!=1023 else None),longitude=sint(b[57:85])/600000,latitude=sint(b[85:112])/600000,cog=(int(b[112:124],2)/10 if int(b[112:124],2)!=3600 else None),heading=(int(b[124:133],2) if int(b[124:133],2)!=511 else None))
     elif t==19 and len(b)>=309:
         r.update(sog=(int(b[46:56],2)/10 if int(b[46:56],2)!=1023 else None),longitude=sint(b[57:85])/600000,latitude=sint(b[85:112])/600000,cog=(int(b[112:124],2)/10 if int(b[112:124],2)!=3600 else None),heading=(int(b[124:133],2) if int(b[124:133],2)!=511 else None),vessel_name=astr(b[143:263]),vessel_type=int(b[263:271],2))
-    elif t==21 and len(b)>=249:r.update(vessel_type=int(b[38:42],2),vessel_name=astr(b[43:163]),longitude=sint(b[164:192])/600000,latitude=sint(b[192:219])/600000)
+    elif t==21 and len(b)>=249:r.update(vessel_type=int(b[38:42],2),vessel_name=astr(b[43:163]),longitude=sint(b[164:192])/600000,latitude=sint(b[192:219])/600000,length=(int(b[219:228],2)+int(b[228:237],2)),width=(int(b[237:243],2)+int(b[243:249],2)))
     elif t==24 and len(b)>=160:
         part=int(b[38:40],2)
         if part==0:r["vessel_name"]=astr(b[40:160])
-        elif part==1:r.update(vessel_type=int(b[40:48],2),callsign=astr(b[90:132]))
+        elif part==1:r.update(vessel_type=int(b[40:48],2),callsign=astr(b[90:132]),length=(int(b[132:141],2)+int(b[141:150],2)) if len(b)>=150 else None,width=(int(b[150:156],2)+int(b[156:162],2)) if len(b)>=162 else None)
     elif t==27 and len(b)>=104:r.update(sog=(int(b[46:54],2) if int(b[46:54],2)!=127 else None),cog=(int(b[55:64],2)*2 if int(b[55:64],2)!=511 else None),longitude=sint(b[64:84])/600,latitude=sint(b[84:104])/600)
     return r
 
