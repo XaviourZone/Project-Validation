@@ -16,6 +16,6 @@ sources:
   NAIS: {type: tcp, remote_host: 127.0.0.1, remote_port: 20003, parser: NAIS, enabled: false, framing: line, delimiter: "\\n", max_line_length: 65536, reconnect_initial_delay: 2.0, reconnect_max_delay: 60.0, reconnect_multiplier: 2.0}
 retry: {max_attempts: 5, initial_delay_seconds: 2.0, max_delay_seconds: 60.0, backoff_multiplier: 2.0}
 queue: {max_size: 10000, worker_count: 4, high_watermark_ratio: 0.8}
-monitoring: {enabled: true, http_host: 127.0.0.1, http_port: 8080}
+monitoring: {enabled: true, http_host: 127.0.0.1, http_port: 18080}
 state:
   db_path: state/router_state
