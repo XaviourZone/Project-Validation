@@ -182,9 +182,23 @@ def import_unlocode(folder):
 def import_reference(source,folder):
     source=source.upper(); folder=Path(folder).expanduser().resolve()
     if not folder.is_dir(): raise ValueError("Folder does not exist: "+str(folder))
+    if source=="WRS":
+        names={p.name.casefold():p for p in folder.iterdir() if p.is_dir()}
+        datasets=names.get("datasets")
+        decode=names.get("decode") or names.get("decode files")
+        if not datasets or not decode:
+            raise ValueError("WRS source must contain Datasets and Decode/Decode Files folders")
+        return import_csv("WRS",folder)
+    if source=="NSC":
+        files=list(folder.rglob("*.csv"))
+        east=any("EAST" in p.name.upper() or "EAST" in str(p.parent).upper() for p in files)
+        west=any("WEST" in p.name.upper() or "WEST" in str(p.parent).upper() for p in files)
+        if not east or not west:
+            raise ValueError("NSC source must contain both EAST and WEST CSV data")
+        return import_csv("NSC",folder)
     if source=="PANS": return import_pans(folder)
     if source=="UNLOCODE": return import_unlocode(folder)
-    return import_csv(source,folder)
+    raise ValueError("Unsupported reference source: "+source)
 
 def pid_alive(pid):
     if os.name=="nt":
@@ -221,7 +235,7 @@ PAGE="""<!doctype html><html><head><meta charset=utf-8><title>Validation</title>
 
 class Handler(BaseHTTPRequestHandler):
     def page(self,body,code=200):
-        raw=PAGE.format(body).encode(); self.send_response(code); self.send_header("Content-Type","text/html"); self.end_headers(); self.wfile.write(raw)
+        raw=PAGE.replace("{}",body).encode(); self.send_response(code); self.send_header("Content-Type","text/html"); self.end_headers(); self.wfile.write(raw)
     def log_message(self,*a): pass
     def do_GET(self):
         u=urlparse(self.path); q=parse_qs(u.query); path=u.path
