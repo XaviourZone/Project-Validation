@@ -1,6 +1,6 @@
 server:
   http_host: 127.0.0.1
-  http_port: 8082
+  http_port: 18082
 spool:
   input_dir: forwarder/spool/pending
   archive_dir: forwarder/spool/delivered
@@ -11,8 +11,8 @@ spool:
   claim_timeout_seconds: 300
 retry:
   max_attempts: 5
-  initial_delay_seconds: 2
-  max_delay_seconds: 60
+  initial_delay_seconds: 2.0
+  max_delay_seconds: 60.0
   multiplier: 2.0
 destinations:
   D-DIODE-01:
