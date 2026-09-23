@@ -290,6 +290,47 @@ class ReferenceManager:
             return {"success": False, "path": "", "message": f"Native folder picker unavailable: {exc}"}
 
 
+def router_sources() -> list[dict[str, Any]]:
+    path = ROOT / "router" / "config" / "sources.yaml"
+    with path.open("r", encoding="utf-8") as fh:
+        cfg = yaml.safe_load(fh) or {}
+    base = Path(str((cfg.get("data_inflow", {}) or {}).get("base_dir", "DATA_INFLOW")))
+    if not base.is_absolute():
+        base = ROOT / base
+    result = []
+    for name, item in (cfg.get("sources", {}) or {}).items():
+        item = item or {}
+        folder = Path(str(item.get("folder", "")))
+        if not folder.is_absolute():
+            folder = base / folder
+        result.append({
+            "name": name,
+            "type": item.get("type", ""),
+            "parser": item.get("parser", ""),
+            "enabled": bool(item.get("enabled", False)),
+            "folder": str(folder),
+            "exists": folder.is_dir(),
+        })
+    return result
+
+
+def set_router_source(name: str, folder: str) -> dict[str, Any]:
+    path = ROOT / "router" / "config" / "sources.yaml"
+    with path.open("r", encoding="utf-8") as fh:
+        cfg = yaml.safe_load(fh) or {}
+    sources = cfg.setdefault("sources", {})
+    if name not in sources:
+        raise ValueError(f"Unknown Router source: {name}")
+    selected = Path(folder).expanduser().resolve()
+    if not selected.is_dir():
+        raise ValueError(f"Folder does not exist: {selected}")
+    sources[name]["folder"] = str(selected)
+    tmp = path.with_suffix(".tmp")
+    tmp.write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    tmp.replace(path)
+    return next(x for x in router_sources() if x["name"] == name)
+
+
 class Console:
     def __init__(self):
         ensure_runtime_dirs()
@@ -342,6 +383,9 @@ class Console:
         self.stop_all()
         self.shutdown_event.set()
 
+    def router_sources(self) -> list[dict[str, Any]]:
+        return router_sources()
+
 
 CONSOLE = Console()
 
@@ -370,6 +414,9 @@ class Handler(BaseHTTPRequestHandler):
                 return
             if path == "/api/reference/status":
                 self._json(CONSOLE.reference.status())
+                return
+            if path == "/api/router/sources":
+                self._json({"sources": CONSOLE.router_sources()})
                 return
             if path == "/api/reference/browse":
                 self._json(CONSOLE.reference.browse())
@@ -426,6 +473,11 @@ class Handler(BaseHTTPRequestHandler):
                     result = getattr(CONSOLE.services[name], action)()
                     self._json(result)
                     return
+            if path == "/api/router/source":
+                name = str(body.get("name", ""))
+                folder = str(body.get("folder", ""))
+                self._json({"success": True, "source": set_router_source(name, folder)})
+                return
             if path == "/api/reference/source":
                 name = str(body.get("name", ""))
                 folder = str(body.get("folder", ""))
