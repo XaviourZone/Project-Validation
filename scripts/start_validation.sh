@@ -3,7 +3,7 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 export VALIDATION_HOME="$ROOT"
 export PYTHONPATH="$ROOT\${PYTHONPATH:+:$PYTHONPATH}"
-mkdir -p "$ROOT/DATA_INFLOW"/{SAIS_IOR,SAIS_GLOBAL,MSIS,LRIT} "$ROOT/forwarder/spool"/{pending,delivered,failed} "$ROOT/router/state" "$ROOT/parser/state" "$ROOT/parser/reference"/{wrs,pans,nsc} "$ROOT/forwarder/state" "$ROOT/logs"
+mkdir -p "$ROOT/DATA_INFLOW"/{SAIS_IOR,SAIS_GLOBAL,MSIS,LRIT} "$ROOT/forwarder/spool"/{pending,delivered,failed} "$ROOT/router/state" "$ROOT/parser/state" "$ROOT/parser/reference" "$ROOT/forwarder/state" "$ROOT/logs"
 PIDS=()
 cleanup(){ trap - INT TERM EXIT; for p in "\${PIDS[@]:-}"; do kill "$p" 2>/dev/null || true; done; wait || true; }
 trap cleanup INT TERM EXIT
