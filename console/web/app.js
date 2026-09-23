@@ -102,7 +102,7 @@ function renderReference(d){
     '<div class="row"><label>Store</label><span class="ref-value">'+esc(d.store_path)+'</span></div>'+
     '<div class="row"><label>Source check</label><span class="ref-value">'+esc(req||"No folder schema required")+'</span></div>'+
     '<div class="row"><label>Loaded</label><span class="ref-value">'+esc((d.files_loaded||0)+" files · "+(d.rows||0)+" rows")+'</span></div>'+
-    '</div><div class="actions"><button onclick="applyReference(\''+esc(d.name)+'\')">SAVE SOURCE</button><button onclick="validateReference(\''+esc(d.name)+'\')">VALIDATE</button><button onclick="loadReference(\''+esc(d.name)+'\')">LOAD ROCKSDB</button></div></article>';
+    '</div><div class="actions"><button onclick="applyReference(\''+esc(d.name)+'\')">SAVE SOURCE</button><button onclick="validateReference(\''+esc(d.name)+'\')">VALIDATE</button><button onclick="loadReference(\''+esc(d.name)+'\')">'+(d.store_ready?"UPDATE ROCKSDB":"LOAD ROCKSDB")+'</button></div></article>';
 }
 function referenceCard(name){return [...document.querySelectorAll(".reference")].find(x=>x.querySelector("h3")?.textContent===name);}
 async function applyReference(name){
@@ -124,7 +124,7 @@ async function validateReference(name){
 async function loadReference(name){
   try{
     const r=await api("/api/reference/load",{method:"POST",body:JSON.stringify({name})});
-    msg(name+" RocksDB loaded: "+((r.manifest?.rows)||0)+" rows.");
+    msg(name+" RocksDB updated from current source: "+((r.manifest?.rows)||0)+" rows.");
     await loadReferenceStatus();
   }catch(e){msg(e.message);}
 }
