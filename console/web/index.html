@@ -2,40 +2,61 @@
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
-<title>Validation Operator Console</title>
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Validation Console</title>
 <link rel="stylesheet" href="/static/style.css">
 </head>
 <body>
-<main class="shell">
-<header class="topbar">
-  <div><div class="eyebrow">VALIDATION</div><h1>Operator Console</h1></div>
-  <div class="top-state"><span id="clock">--:--:--</span><span class="dot"></span><span>LOCAL</span></div>
-</header>
+<div class="app">
+  <header class="top">
+    <div>
+      <div class="eyebrow">VALIDATION</div>
+      <h1>Operator Console</h1>
+    </div>
+    <div class="top-actions">
+      <span id="clock">--:--:--</span>
+      <button class="quiet" onclick="refresh()">REFRESH</button>
+    </div>
+  </header>
 
-<section class="servicebar">
-  <div><b>ROUTER</b><span id="router-state" class="state">--</span><button onclick="serviceAction('router','start')">START</button><button onclick="serviceAction('router','stop')">STOP</button></div>
-  <div><b>PARSER</b><span id="parser-state" class="state">--</span><button onclick="serviceAction('parser','start')">START</button><button onclick="serviceAction('parser','stop')">STOP</button></div>
-  <div><b>FORWARDER</b><span id="forwarder-state" class="state">--</span><button onclick="serviceAction('forwarder','start')">START</button><button onclick="serviceAction('forwarder','stop')">STOP</button></div>
-  <div><b>CONSOLE</b><span class="state good">RUNNING</span></div>
-</section>
+  <section class="services">
+    <div class="service"><span>ROUTER</span><b id="router-state">--</b><button onclick="serviceAction('router','start')">START</button><button onclick="serviceAction('router','stop')">STOP</button></div>
+    <div class="service"><span>PARSER</span><b id="parser-state">--</b><button onclick="serviceAction('parser','start')">START</button><button onclick="serviceAction('parser','stop')">STOP</button></div>
+    <div class="service"><span>FORWARDER</span><b id="forwarder-state">--</b><button onclick="serviceAction('forwarder','start')">START</button><button onclick="serviceAction('forwarder','stop')">STOP</button></div>
+    <div class="console-state"><span>CONSOLE</span><b>RUNNING</b></div>
+  </section>
 
-<section class="reference-head"><div><div class="eyebrow">REFERENCE DATABASE</div><h2>WRS / PANS / NSC</h2><p id="reference-summary">Loading...</p></div><button onclick="loadReferenceStatus()">REFRESH</button></section>
-<section id="references" class="references"></section>
+  <main>
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <div class="eyebrow">REFERENCE DATA</div>
+          <h2>WRS · PANS · NSC</h2>
+          <p>Map the source once. Validate, then update the live RocksDB reference store.</p>
+        </div>
+      </div>
+      <div id="references" class="reference-grid"></div>
+    </section>
 
-<section class="router-head">
-  <div><div class="eyebrow">DATA ROUTER</div><h2>Input Sources</h2><p id="router-summary">Loading...</p></div>
-  <button onclick="refresh()">REFRESH</button>
-</section>
+    <section class="section">
+      <div class="section-head">
+        <div>
+          <div class="eyebrow">DATA ROUTER</div>
+          <h2>Input Sources</h2>
+          <p id="router-summary">Loading…</p>
+        </div>
+      </div>
+      <div id="sources" class="source-grid"></div>
+    </section>
 
-<section id="sources" class="sources"></section>
+    <details class="diagnostics">
+      <summary>Router diagnostics</summary>
+      <pre id="router-status">Waiting…</pre>
+    </details>
+  </main>
 
-<section class="router-status">
-  <div><div class="eyebrow">LIVE STATUS</div><pre id="router-status">Waiting for Router...</pre></div>
-</section>
-
-<footer><span id="message">Ready</span><span>Services are independent processes</span></footer>
-</main>
+  <footer><span id="message">Ready</span><span>Local · Offline capable</span></footer>
+</div>
 <script src="/static/app.js"></script>
 </body>
 </html>
