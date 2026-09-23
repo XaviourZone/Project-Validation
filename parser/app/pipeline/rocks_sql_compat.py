@@ -3,8 +3,10 @@ import re
 from dataclasses import dataclass
 from pathlib import Path
 from shared.storage.rocksdb_store import RocksDBStore
-class _SQLiteCompat: Error=Exception
-sqlite3=_SQLiteCompat()
+class RocksDBReferenceError(Exception):
+    """Raised when a reference query is unsupported for the RocksDB adapter."""
+
+
 @dataclass
 class _Row(dict): pass
 class RocksCursor:
@@ -30,11 +32,11 @@ class RocksSQLCompatConnection:
   return False
  def _execute(self,sql,params):
   q=re.sub(r"\s+"," ",sql.strip());m=re.match(r"SELECT (.+?) FROM ([A-Za-z0-9_]+)(?: WHERE (.*?))?(?: ORDER BY ([A-Za-z0-9_]+)(?: (ASC|DESC))?)?(?: LIMIT (\d+))?$",q,re.I)
-  if not m:raise ValueError(f"Unsupported reference query: {sql}")
+  if not m:raise RocksDBReferenceError(f"Unsupported reference query: {sql}")
   cols,table,where,order_col,order_dir,limit=m.groups();rows=self.rows(table)
   if where:
    wm=re.match(r"(?:UPPER|LOWER)\(([A-Za-z0-9_]+)\)\s*(=|LIKE)\s*\?",where,re.I) or re.match(r"([A-Za-z0-9_]+)\s*(=|LIKE)\s*\?",where,re.I)
-   if not wm:raise ValueError(f"Unsupported WHERE clause: {where}")
+   if not wm:raise RocksDBReferenceError(f"Unsupported WHERE clause: {where}")
    rows=[r for r in rows if self.match(r,wm.group(1),wm.group(2),(params or (None,))[0])]
   if order_col:
    def key(r):
