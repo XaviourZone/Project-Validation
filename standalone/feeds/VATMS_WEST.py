@@ -86,7 +86,6 @@ def parse_ais(line):
     if not line.startswith(("!","$")):raise ValueError("bad NMEA prefix")
     if not checksum(line):raise ValueError("checksum failed")
     p=line.split(","); total=int(p[1]) if len(p)>1 and p[1].isdigit() else 1
-    if total!=1: raise ValueError("multipart AIS must be supplied as a complete sentence group")
     payload=p[5];fill=0
     if len(p)>6:
         try:fill=int(p[6].split("*",1)[0] or 0)
