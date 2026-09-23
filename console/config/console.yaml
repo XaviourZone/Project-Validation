@@ -2,15 +2,16 @@ server:
   host: 127.0.0.1
   port: 8080
 
+# Services are independent. The console does not auto-start or stop them.
 auto_start:
-  router: true
-  parser: true
-  forwarder: true
+  router: false
+  parser: false
+  forwarder: false
 
 services:
   router:
     command: [router.app.main, --config, router/config/sources.yaml]
-    health_url: http://127.0.0.1:18080/health
+    health_url: http://127.0.0.1:18080/status
     log_file: logs/router.log
   parser:
     command: [parser.app.main, --config, parser/config/parser.yaml]
