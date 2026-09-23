@@ -29,8 +29,8 @@ reference:
   PANS:
     source_folder: ""
     store_path: parser/reference/pans
-    required_folders: [Datasets, Decode]
+    required_folders: []
   NSC:
     source_folder: ""
     store_path: parser/reference/nsc
-    required_folders: [Datasets, Decode]
+    required_folders: []
