@@ -103,7 +103,7 @@ ON CONFLICT(source_id) DO UPDATE SET source_name=EXCLUDED.source_name, descripti
 
 CREATE TABLE IF NOT EXISTS vessel_state (
     mmsi BIGINT PRIMARY KEY,
-    values JSONB NOT NULL DEFAULT '{}'::jsonb,
+    state_values JSONB NOT NULL DEFAULT '{}'::jsonb,
     last_timestamp TIMESTAMPTZ,
     last_source TEXT,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
