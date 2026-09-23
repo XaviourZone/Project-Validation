@@ -68,3 +68,21 @@ def files_in_folder(folder:Path,patterns:Iterable[str]):
         for p in sorted(folder.glob(pattern)):
             if p.is_file() and p not in seen:
                 seen.add(p); yield p
+
+def get_vessel_state(conn,mmsi:int):
+    row=conn.execute("SELECT values FROM vessel_state WHERE mmsi=%s",(int(mmsi),)).fetchone()
+    return dict(row["values"]) if row and row["values"] else {}
+
+def update_vessel_state(conn,mmsi:int,values:dict,timestamp=None,source:str=""):
+    if not mmsi: return
+    old=get_vessel_state(conn,mmsi)
+    merged=dict(old)
+    for k,v in values.items():
+        if v not in (None,""): merged[k]=v
+    conn.execute("INSERT INTO vessel_state_history(mmsi,values,event_timestamp,source) VALUES(%s,%s,%s,%s)",
+                 (int(mmsi),json.dumps(merged,ensure_ascii=False),timestamp,source))
+    conn.execute("""INSERT INTO vessel_state(mmsi,values,last_timestamp,last_source)
+                    VALUES(%s,%s,%s,%s)
+                    ON CONFLICT(mmsi) DO UPDATE SET values=EXCLUDED.values,last_timestamp=EXCLUDED.last_timestamp,last_source=EXCLUDED.last_source,updated_at=now()""",
+                 (int(mmsi),json.dumps(merged,ensure_ascii=False),timestamp,source))
+    return merged
