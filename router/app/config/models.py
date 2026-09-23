@@ -96,8 +96,8 @@ class MonitoringConfig:
 
 @dataclass
 class StateConfig:
-    """Configuration for local SQLite state storage."""
-    db_path: str = "state/router_state.db"
+    """Configuration for local RocksDB state storage."""
+    db_path: str = "state/router_state"
 
 
 @dataclass
