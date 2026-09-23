@@ -294,6 +294,33 @@ def add_mapping():
         c.commit()
     return jsonify({"status":"PASS"})
 
+def import_unlocode_csv(path: Path):
+    total=0
+    with path.open("r",encoding="utf-8-sig",newline="") as f:
+        reader=csv.DictReader(f)
+        with connect() as conn:
+            for row in reader:
+                norm={clean_column(k):str(v or "").strip() for k,v in row.items()}
+                country=norm.get("COUNTRY") or norm.get("COUNTRY_CODE") or ""
+                location=norm.get("LOCATION") or norm.get("LOCATION_CODE") or ""
+                code=(norm.get("LOCODE") or (country+location)).replace(" ","").upper()
+                name=norm.get("NAME") or norm.get("NAMEWODIACRITICS") or ""
+                if len(code)!=5 or not name:continue
+                conn.execute("""INSERT INTO unlocode(code,country_code,location_code,name,subdivision,status)
+                                VALUES(%s,%s,%s,%s,%s,%s)
+                                ON CONFLICT(code) DO UPDATE SET country_code=EXCLUDED.country_code,location_code=EXCLUDED.location_code,name=EXCLUDED.name,subdivision=EXCLUDED.subdivision,status=EXCLUDED.status,updated_at=now()""",
+                             (code,country,location,norm.get("NAME") or name,norm.get("SUBDIVISION") or norm.get("SUBDIV"),norm.get("STATUS")))
+                total+=1
+            conn.commit()
+    return total
+
+@app.post("/api/unlocode/import")
+def import_unlocode():
+    path=Path((request.get_json(silent=True) or {}).get("path","")).expanduser().resolve()
+    if not path.is_file(): return jsonify({"error":"CSV file does not exist"}),400
+    try:return jsonify({"status":"PASS","rows":import_unlocode_csv(path)})
+    except Exception as exc:return jsonify({"status":"FAIL","error":str(exc)}),400
+
 @app.post("/api/unlocode")
 def add_unlocode():
     x=request.get_json(silent=True) or {}
@@ -359,7 +386,7 @@ PAGE = """<!doctype html><html><head><meta charset=utf-8><title>Validation DB Ma
 <div class=card><h3>PANS live folder</h3><input id=pans size=70 placeholder="PANS folder path"><button onclick=setPans()>Set Folder</button></div>
 <div class=card><h3>Source ID</h3><input id=sid placeholder="1"><input id=sname placeholder="SAIS_IOR"><input id=sdesc placeholder="description"><button onclick=addSource()>Save</button></div>
 <div class=card><h3>Field mapping</h3><input id=msid placeholder="source id"><input id=mi placeholder="input field"><input id=mt placeholder="target field"><input id=mx placeholder="transformation"><button onclick=addMapping()>Save</button></div>
-<div class=card><h3>UN/LOCODE</h3><input id=ucode placeholder="INBOM"><input id=uname placeholder="MUMBAI"><input id=ucountry placeholder="IN"><input id=uloc placeholder="BOM"><button onclick=addUnlocode()>Save</button></div>
+<div class=card><h3>UN/LOCODE</h3><input id=upath size=60 placeholder="CSV file path"><button onclick=importUnlocode()>Import CSV</button><br><input id=ucode placeholder="INBOM"><input id=uname placeholder="MUMBAI"><input id=ucountry placeholder="IN"><input id=uloc placeholder="BOM"><button onclick=addUnlocode()>Save</button></div>
 <div class=card><h3>Destination mapping</h3><input id=dsource placeholder="MSIS"><input id=dcode placeholder="INBOM"><input id=dname placeholder="MUMBAI"><button onclick=addDestination()>Save</button></div>
 <div class=card><h3>Manual reference row</h3><input id=rsource placeholder="WRS"><input id=rtable placeholder="wrs_datasets_vessels"><input id=rkey placeholder="VESSEL_ID"><textarea id=rdata placeholder='{"VESSEL_ID":"...","MMSI":"..."}'></textarea><button onclick=addRow()>Upsert</button></div>
 <div class=card><h3>Reference search</h3><input id=q size=50 placeholder="MMSI / IMO / name / text"><button onclick=search()>Search</button><pre id=out></pre></div>
@@ -370,7 +397,7 @@ async function imp(s){document.getElementById('out').textContent=JSON.stringify(
 async function setPans(){document.getElementById('out').textContent=JSON.stringify(await post('/api/pans/folder',{folder:document.getElementById('pans').value}),null,2);}
 async function addSource(){document.getElementById('out').textContent=JSON.stringify(await post('/api/source',{source_id:+sid.value,source_name:sname.value,description:sdesc.value}),null,2);refresh();}
 async function addMapping(){document.getElementById('out').textContent=JSON.stringify(await post('/api/mapping',{source_id:+msid.value,input_field:mi.value,target_field:mt.value,transformation:mx.value}),null,2);refresh();}
-async function addUnlocode(){document.getElementById('out').textContent=JSON.stringify(await post('/api/unlocode',{code:ucode.value,name:uname.value,country_code:ucountry.value,location_code:uloc.value}),null,2);refresh();}
+async function importUnlocode(){document.getElementById("out").textContent=JSON.stringify(await post("/api/unlocode/import",{path:document.getElementById("upath").value}),null,2);refresh();}\nasync function addUnlocode(){document.getElementById('out').textContent=JSON.stringify(await post('/api/unlocode',{code:ucode.value,name:uname.value,country_code:ucountry.value,location_code:uloc.value}),null,2);refresh();}
 async function addDestination(){document.getElementById('out').textContent=JSON.stringify(await post('/api/destination',{source_code:dsource.value,destination_code:dcode.value,destination_name:dname.value}),null,2);refresh();}
 async function addRow(){document.getElementById('out').textContent=JSON.stringify(await post('/api/reference-row',{source:rsource.value,table:rtable.value,row_key:rkey.value,data:JSON.parse(rdata.value)}),null,2);refresh();}
 async function search(){const r=await fetch('/api/search?q='+encodeURIComponent(q.value));document.getElementById('out').textContent=JSON.stringify(await r.json(),null,2);}
