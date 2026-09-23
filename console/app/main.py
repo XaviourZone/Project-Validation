@@ -1,8 +1,13 @@
-"""Minimal single-port Validation operator console.
+"""Validation operator console.
 
-The console is intentionally dependency-light: stdlib HTTP server plus PyYAML.
-It is the operator/control plane. Router, Parser and Forwarder remain separate
-runtime services and keep their existing processing responsibilities.
+The console is a control/monitoring plane only. Router, Parser and Forwarder
+remain independent OS processes and can be started/stopped directly without
+the console. The console can optionally control an individual service, but
+closing the console never stops a service.
+
+Router source configuration is edited directly in router/config/sources.yaml
+and the Router is restarted only when the operator explicitly applies a
+configuration change.
 """
 from __future__ import annotations
 
@@ -14,23 +19,22 @@ import subprocess
 import sys
 import threading
 import time
-import urllib.error
 import urllib.request
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 
 import yaml
 
-
 ROOT = Path(__file__).resolve().parents[2]
 CONFIG_PATH = ROOT / "console" / "config" / "console.yaml"
+ROUTER_CONFIG = ROOT / "router" / "config" / "sources.yaml"
 WEB_ROOT = ROOT / "console" / "web"
 LOG_ROOT = ROOT / "logs"
 
 SERVICE_DEFAULTS = {
     "router": {
         "command": ["router.app.main", "--config", "router/config/sources.yaml"],
-        "health_url": "http://127.0.0.1:18080/health",
+        "health_url": "http://127.0.0.1:18080/status",
         "log_file": "logs/router.log",
     },
     "parser": {
@@ -46,20 +50,22 @@ SERVICE_DEFAULTS = {
 }
 
 
-def load_config() -> dict[str, Any]:
-    with CONFIG_PATH.open("r", encoding="utf-8") as fh:
+def load_yaml(path: Path) -> dict[str, Any]:
+    with path.open("r", encoding="utf-8") as fh:
         return yaml.safe_load(fh) or {}
 
 
-def save_config(cfg: dict[str, Any]) -> None:
-    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp = CONFIG_PATH.with_suffix(".tmp")
-    tmp.write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True), encoding="utf-8")
-    tmp.replace(CONFIG_PATH)
+def save_yaml(path: Path, cfg: dict[str, Any]) -> None:
+    tmp = path.with_suffix(path.suffix + ".tmp")
+    tmp.write_text(
+        yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True),
+        encoding="utf-8",
+    )
+    tmp.replace(path)
 
 
 def ensure_runtime_dirs() -> None:
-    for rel in [
+    for rel in (
         "DATA_INFLOW/SAIS_IOR",
         "DATA_INFLOW/SAIS_GLOBAL",
         "DATA_INFLOW/MSIS",
@@ -72,11 +78,181 @@ def ensure_runtime_dirs() -> None:
         "parser/reference",
         "forwarder/state",
         "logs",
-    ]:
+    ):
         (ROOT / rel).mkdir(parents=True, exist_ok=True)
 
 
+def _router_base_dir(cfg: dict[str, Any]) -> Path:
+    raw = Path(str((cfg.get("data_inflow") or {}).get("base_dir", "DATA_INFLOW")))
+    return raw if raw.is_absolute() else ROOT / raw
+
+
+def _source_path(cfg: dict[str, Any], source: dict[str, Any]) -> Path:
+    raw = Path(str(source.get("folder", "")))
+    if raw.is_absolute():
+        return raw
+    return _router_base_dir(cfg) / raw
+
+
+def _router_source_entries() -> list[dict[str, Any]]:
+    cfg = load_yaml(ROUTER_CONFIG)
+    result = []
+    for name, raw in (cfg.get("sources") or {}).items():
+        item = dict(raw or {})
+        entry = {
+            "name": name,
+            "type": str(item.get("type", "")),
+            "parser": str(item.get("parser", "")),
+            "enabled": bool(item.get("enabled", False)),
+            "config": item,
+        }
+        if entry["type"] == "file":
+            folder = _source_path(cfg, item)
+            entry.update({
+                "folder": str(folder),
+                "exists": folder.is_dir(),
+                "patterns": list(item.get("file_patterns") or []),
+                "poll_interval_seconds": float(item.get("poll_interval_seconds", 1.0)),
+                "stability_window_seconds": float(item.get("stability_window_seconds", 1.0)),
+                "preserve_file": bool(item.get("preserve_file", False)),
+                "processed_folder": str(item.get("processed_folder", "")),
+            })
+        elif entry["type"] == "tcp":
+            entry.update({
+                "host": str(item.get("remote_host", "")),
+                "port": int(item.get("remote_port", 0)),
+                "framing": str(item.get("framing", "line")),
+                "delimiter": str(item.get("delimiter", "\\n")),
+                "max_line_length": int(item.get("max_line_length", 65536)),
+                "reconnect_initial_delay": float(item.get("reconnect_initial_delay", 2.0)),
+                "reconnect_max_delay": float(item.get("reconnect_max_delay", 60.0)),
+                "reconnect_multiplier": float(item.get("reconnect_multiplier", 2.0)),
+            })
+        result.append(entry)
+    return result
+
+
+def router_sources() -> dict[str, Any]:
+    cfg = load_yaml(ROUTER_CONFIG)
+    return {
+        "base_dir": str(_router_base_dir(cfg)),
+        "parser_destinations": cfg.get("parser_destinations") or {},
+        "sources": _router_source_entries(),
+    }
+
+
+def update_router_source(name: str, values: dict[str, Any]) -> dict[str, Any]:
+    cfg = load_yaml(ROUTER_CONFIG)
+    sources = cfg.setdefault("sources", {})
+    if name not in sources:
+        raise ValueError(f"Unknown Router source: {name}")
+
+    current = sources[name] or {}
+    stype = str(current.get("type", "")).lower()
+    if stype == "file":
+        if "folder" in values:
+            folder = Path(str(values["folder"]).strip()).expanduser()
+            if not folder.is_absolute():
+                folder = (ROOT / folder).resolve()
+            else:
+                folder = folder.resolve()
+            if not folder.is_dir():
+                raise ValueError(f"Folder does not exist: {folder}")
+            current["folder"] = str(folder)
+        if "enabled" in values:
+            current["enabled"] = bool(values["enabled"])
+        if "parser" in values:
+            current["parser"] = str(values["parser"]).strip()
+        if "file_patterns" in values:
+            patterns = values["file_patterns"]
+            if not isinstance(patterns, list) or not patterns or any(not str(x).strip() for x in patterns):
+                raise ValueError("file_patterns must be a non-empty list")
+            current["file_patterns"] = [str(x).strip() for x in patterns]
+        for key in ("poll_interval_seconds", "stability_window_seconds"):
+            if key in values:
+                val = float(values[key])
+                if val <= 0:
+                    raise ValueError(f"{key} must be > 0")
+                current[key] = val
+        if "preserve_file" in values:
+            current["preserve_file"] = bool(values["preserve_file"])
+        if "processed_folder" in values:
+            current["processed_folder"] = str(values["processed_folder"] or "")
+    elif stype == "tcp":
+        if "enabled" in values:
+            current["enabled"] = bool(values["enabled"])
+        if "parser" in values:
+            current["parser"] = str(values["parser"]).strip()
+        if "remote_host" in values:
+            host = str(values["remote_host"]).strip()
+            if not host:
+                raise ValueError("remote_host cannot be empty")
+            current["remote_host"] = host
+        if "remote_port" in values:
+            port = int(values["remote_port"])
+            if not 1 <= port <= 65535:
+                raise ValueError("remote_port must be 1-65535")
+            current["remote_port"] = port
+        if "framing" in values:
+            framing = str(values["framing"]).strip()
+            if framing not in ("line", "length_prefixed", "raw_block"):
+                raise ValueError("Unsupported framing")
+            current["framing"] = framing
+        if "delimiter" in values:
+            current["delimiter"] = str(values["delimiter"])
+        for key in ("max_line_length",):
+            if key in values:
+                val = int(values[key])
+                if val < 1:
+                    raise ValueError(f"{key} must be > 0")
+                current[key] = val
+        for key in ("reconnect_initial_delay", "reconnect_max_delay", "reconnect_multiplier"):
+            if key in values:
+                val = float(values[key])
+                if val <= 0:
+                    raise ValueError(f"{key} must be > 0")
+                current[key] = val
+    else:
+        raise ValueError(f"Unsupported Router source type: {stype}")
+
+    sources[name] = current
+    save_yaml(ROUTER_CONFIG, cfg)
+    return next(x for x in _router_source_entries() if x["name"] == name)
+
+
+def router_status() -> dict[str, Any]:
+    try:
+        with urllib.request.urlopen("http://127.0.0.1:18080/status", timeout=2.0) as response:
+            return json.loads(response.read().decode("utf-8"))
+    except Exception as exc:
+        return {"reachable": False, "error": str(exc)}
+
+
+def browse_folder(title: str) -> dict[str, Any]:
+    try:
+        import tkinter as tk
+        from tkinter import filedialog
+        root = tk.Tk()
+        root.withdraw()
+        root.attributes("-topmost", True)
+        selected = filedialog.askdirectory(title=title)
+        root.destroy()
+        return {
+            "success": bool(selected),
+            "path": selected or "",
+            "message": "Folder selected." if selected else "No folder selected.",
+        }
+    except Exception as exc:
+        return {
+            "success": False,
+            "path": "",
+            "message": f"Native folder picker unavailable: {exc}",
+        }
+
+
 class ServiceController:
+    """Optional process control. Services are independent and are not owned by Console."""
+
     def __init__(self, name: str, definition: dict[str, Any]):
         self.name = name
         self.definition = definition
@@ -88,7 +264,7 @@ class ServiceController:
 
     def _command(self) -> list[str]:
         configured = self.definition.get("command") or SERVICE_DEFAULTS[self.name]["command"]
-        return [sys.executable, "-m", *[str(x) for x in configured]]
+        return [sys.executable, "-m", *map(str, configured)]
 
     def _health(self) -> dict[str, Any]:
         url = self.definition.get("health_url") or SERVICE_DEFAULTS[self.name]["health_url"]
@@ -96,24 +272,26 @@ class ServiceController:
             with urllib.request.urlopen(url, timeout=1.5) as response:
                 raw = response.read().decode("utf-8")
                 payload = json.loads(raw) if raw else {}
-                return {"reachable": True, "status": payload.get("status", payload.get("overall_status", "OK")), "data": payload}
+                return {
+                    "reachable": True,
+                    "status": payload.get("status", payload.get("overall_status", "OK")),
+                    "data": payload,
+                }
         except Exception as exc:
             return {"reachable": False, "status": "UNREACHABLE", "error": str(exc)}
 
     def refresh_process(self) -> None:
-        with self.lock:
-            if self.process is not None and self.process.poll() is not None:
-                code = self.process.returncode
-                self.process = None
-                if code not in (0, None):
-                    self.last_error = f"process exited with code {code}"
+        if self.process is not None and self.process.poll() is not None:
+            code = self.process.returncode
+            self.process = None
+            if code not in (0, None):
+                self.last_error = f"process exited with code {code}"
 
     def start(self) -> dict[str, Any]:
         with self.lock:
             self.refresh_process()
             if self.process is not None:
                 return {"success": True, "message": f"{self.name} is already running", **self.status()}
-
             ensure_runtime_dirs()
             log_path = ROOT / str(self.definition.get("log_file", f"logs/{self.name}.log"))
             log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -121,60 +299,43 @@ class ServiceController:
             env = os.environ.copy()
             env["VALIDATION_HOME"] = str(ROOT)
             env["PYTHONPATH"] = str(ROOT) + os.pathsep + env.get("PYTHONPATH", "")
-            creationflags = 0
-            if os.name == "nt":
-                creationflags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0)
-
+            flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
             try:
                 self.process = subprocess.Popen(
-                    self._command(),
-                    cwd=str(ROOT),
-                    env=env,
-                    stdin=subprocess.DEVNULL,
-                    stdout=self.log_handle,
-                    stderr=subprocess.STDOUT,
-                    creationflags=creationflags,
+                    self._command(), cwd=str(ROOT), env=env,
+                    stdin=subprocess.DEVNULL, stdout=self.log_handle,
+                    stderr=subprocess.STDOUT, creationflags=flags,
                 )
                 self.started_at = time.time()
                 self.last_error = ""
                 return {"success": True, "message": f"{self.name} start requested", **self.status()}
             except Exception as exc:
                 self.last_error = str(exc)
-                try:
+                if self.log_handle:
                     self.log_handle.close()
-                except Exception:
-                    pass
-                self.log_handle = None
+                    self.log_handle = None
                 return {"success": False, "error": str(exc), **self.status()}
 
     def stop(self) -> dict[str, Any]:
         with self.lock:
             self.refresh_process()
             if self.process is None:
-                return {"success": True, "message": f"{self.name} is already stopped", **self.status()}
-
+                return {"success": True, "message": f"{self.name} is not owned by this console process", **self.status()}
             proc = self.process
             try:
                 if os.name == "nt":
                     proc.terminate()
                 else:
                     proc.send_signal(signal.SIGTERM)
-                try:
-                    proc.wait(timeout=8)
-                except subprocess.TimeoutExpired:
-                    proc.kill()
-                    proc.wait(timeout=3)
-            except Exception as exc:
-                self.last_error = str(exc)
-                return {"success": False, "error": str(exc), **self.status()}
+                proc.wait(timeout=8)
+            except subprocess.TimeoutExpired:
+                proc.kill()
+                proc.wait(timeout=3)
             finally:
                 self.process = None
                 self.started_at = None
                 if self.log_handle:
-                    try:
-                        self.log_handle.close()
-                    except Exception:
-                        pass
+                    self.log_handle.close()
                     self.log_handle = None
             return {"success": True, "message": f"{self.name} stopped", **self.status()}
 
@@ -185,206 +346,93 @@ class ServiceController:
 
     def status(self) -> dict[str, Any]:
         self.refresh_process()
-        process_running = self.process is not None and self.process.poll() is None
-        health = self._health() if process_running else {"reachable": False, "status": "STOPPED"}
-        if process_running and health["reachable"]:
+        owned = self.process is not None and self.process.poll() is None
+        health = self._health()
+        reachable = bool(health.get("reachable"))
+        if reachable:
             state = "RUNNING"
-        elif process_running:
+        elif owned:
             state = "STARTING"
         else:
             state = "STOPPED"
-        result = {
+        return {
             "name": self.name,
             "state": state,
-            "pid": self.process.pid if process_running else None,
-            "uptime_seconds": round(time.time() - self.started_at, 1) if process_running and self.started_at else 0,
+            "owned_by_console": owned,
+            "pid": self.process.pid if owned else None,
+            "uptime_seconds": round(time.time() - self.started_at, 1) if owned and self.started_at else 0,
             "health": health,
             "last_error": self.last_error,
         }
-        return result
 
 
 class ReferenceManager:
-    def __init__(self):
-        self.lock = threading.RLock()
-
     @staticmethod
     def _find_child(folder: Path, name: str) -> Path | None:
         if not folder.exists():
             return None
         wanted = name.casefold()
-        for child in folder.iterdir():
-            if child.name.casefold() == wanted:
-                return child
-        return None
-
-    def _entry(self, name: str, cfg: dict[str, Any]) -> dict[str, Any]:
-        source = str(cfg.get("source_folder", "") or "")
-        source_path = Path(source) if source else None
-        if source_path and not source_path.is_absolute():
-            source_path = ROOT / source_path
-        store = Path(str(cfg.get("store_path", "")))
-        if not store.is_absolute():
-            store = ROOT / store
-
-        source_ok = bool(source_path and source_path.is_dir())
-        required = {}
-        if source_ok:
-            for item in cfg.get("required_folders", ["Datasets", "Decode"]):
-                p = self._find_child(source_path, str(item))
-                required[str(item)] = bool(p and p.is_dir())
-
-        db_files = []
-        if store.exists():
-            db_files = [p.name for p in store.iterdir() if p.is_file() and p.name in {"CURRENT", "IDENTITY", "OPTIONS", "LOG"} or p.name.startswith("MANIFEST")]
-        ready = store.is_dir() and bool(db_files)
-
-        return {
-            "name": name,
-            "source_folder": str(source_path) if source_path else "",
-            "source_exists": source_ok,
-            "required": required,
-            "store_path": str(store),
-            "store_exists": store.exists(),
-            "store_ready": ready,
-            "status": "READY" if ready else ("SOURCE READY" if source_ok and all(required.values()) else "NOT CONFIGURED"),
-        }
+        return next((p for p in folder.iterdir() if p.name.casefold() == wanted), None)
 
     def status(self) -> dict[str, Any]:
-        cfg = load_config()
-        refs = cfg.get("reference", {}) or {}
-        return {"databases": [self._entry(name, item or {}) for name, item in refs.items()]}
+        cfg = load_yaml(CONFIG_PATH)
+        entries = []
+        for name, item in (cfg.get("reference") or {}).items():
+            item = item or {}
+            source = Path(str(item.get("source_folder", ""))) if item.get("source_folder") else None
+            if source and not source.is_absolute():
+                source = ROOT / source
+            store = Path(str(item.get("store_path", "")))
+            if not store.is_absolute():
+                store = ROOT / store
+            required = {}
+            if source and source.is_dir():
+                for folder_name in item.get("required_folders", []):
+                    child = self._find_child(source, str(folder_name))
+                    required[str(folder_name)] = bool(child and child.is_dir())
+            manifests = bool(store.is_dir() and any(store.glob("MANIFEST*")))
+            entries.append({
+                "name": name,
+                "source_folder": str(source) if source else "",
+                "source_exists": bool(source and source.is_dir()),
+                "required": required,
+                "store_path": str(store),
+                "store_ready": manifests,
+                "status": "READY" if manifests else ("SOURCE READY" if source and source.is_dir() and all(required.values()) else "NOT CONFIGURED"),
+            })
+        return {"databases": entries}
 
     def set_source(self, name: str, folder: str) -> dict[str, Any]:
-        folder = str(Path(folder).expanduser().resolve())
-        cfg = load_config()
-        cfg.setdefault("reference", {}).setdefault(name, {})["source_folder"] = folder
-        save_config(cfg)
-        return self._entry(name, cfg["reference"][name])
-
-    def validate(self, name: str) -> dict[str, Any]:
-        item = self.status()
-        match = next((x for x in item["databases"] if x["name"] == name), None)
-        if not match:
+        cfg = load_yaml(CONFIG_PATH)
+        if name not in (cfg.get("reference") or {}):
             raise ValueError(f"Unknown reference database: {name}")
-        if not match["source_exists"]:
-            return {"success": False, "message": "Source folder is not configured or does not exist.", "status": match}
-        missing = [k for k, ok in match["required"].items() if not ok]
-        if missing:
-            return {"success": False, "message": "Missing required folders: " + ", ".join(missing), "status": match}
-        return {"success": True, "message": "Reference source structure is valid.", "status": match}
-
-    def browse(self) -> dict[str, Any]:
-        # Browser folder selection is local to the machine hosting the console.
-        # On headless RHEL this returns a clear fallback message.
-        try:
-            import tkinter as tk
-            from tkinter import filedialog
-            root = tk.Tk()
-            root.withdraw()
-            root.attributes("-topmost", True)
-            selected = filedialog.askdirectory(title="Select reference source folder")
-            root.destroy()
-            return {"success": bool(selected), "path": selected or "", "message": "Folder selected." if selected else "No folder selected."}
-        except Exception as exc:
-            return {"success": False, "path": "", "message": f"Native folder picker unavailable: {exc}"}
-
-
-def router_sources() -> list[dict[str, Any]]:
-    path = ROOT / "router" / "config" / "sources.yaml"
-    with path.open("r", encoding="utf-8") as fh:
-        cfg = yaml.safe_load(fh) or {}
-    base = Path(str((cfg.get("data_inflow", {}) or {}).get("base_dir", "DATA_INFLOW")))
-    if not base.is_absolute():
-        base = ROOT / base
-    result = []
-    for name, item in (cfg.get("sources", {}) or {}).items():
-        item = item or {}
-        folder = Path(str(item.get("folder", "")))
-        if not folder.is_absolute():
-            folder = base / folder
-        result.append({
-            "name": name,
-            "type": item.get("type", ""),
-            "parser": item.get("parser", ""),
-            "enabled": bool(item.get("enabled", False)),
-            "folder": str(folder),
-            "exists": folder.is_dir(),
-        })
-    return result
-
-
-def set_router_source(name: str, folder: str) -> dict[str, Any]:
-    path = ROOT / "router" / "config" / "sources.yaml"
-    with path.open("r", encoding="utf-8") as fh:
-        cfg = yaml.safe_load(fh) or {}
-    sources = cfg.setdefault("sources", {})
-    if name not in sources:
-        raise ValueError(f"Unknown Router source: {name}")
-    selected = Path(folder).expanduser().resolve()
-    if not selected.is_dir():
-        raise ValueError(f"Folder does not exist: {selected}")
-    sources[name]["folder"] = str(selected)
-    tmp = path.with_suffix(".tmp")
-    tmp.write_text(yaml.safe_dump(cfg, sort_keys=False, allow_unicode=True), encoding="utf-8")
-    tmp.replace(path)
-    return next(x for x in router_sources() if x["name"] == name)
+        path = Path(folder).expanduser().resolve()
+        if not path.is_dir():
+            raise ValueError(f"Folder does not exist: {path}")
+        cfg["reference"][name]["source_folder"] = str(path)
+        save_yaml(CONFIG_PATH, cfg)
+        return self.status()
 
 
 class Console:
     def __init__(self):
         ensure_runtime_dirs()
-        cfg = load_config()
+        cfg = load_yaml(CONFIG_PATH)
         self.services = {
-            name: ServiceController(name, (cfg.get("services", {}) or {}).get(name, defaults))
+            name: ServiceController(name, (cfg.get("services") or {}).get(name, defaults))
             for name, defaults in SERVICE_DEFAULTS.items()
         }
         self.reference = ReferenceManager()
-        self.shutdown_event = threading.Event()
 
     def status(self) -> dict[str, Any]:
-        services = {name: controller.status() for name, controller in self.services.items()}
-        running = sum(1 for value in services.values() if value["state"] == "RUNNING")
-        failed = sum(1 for value in services.values() if value["last_error"])
-        ref = self.reference.status()
-        ref_ready = sum(1 for x in ref["databases"] if x["store_ready"])
+        services = {name: ctrl.status() for name, ctrl in self.services.items()}
         return {
-            "system": "RUNNING" if running == 3 else ("DEGRADED" if running else "STOPPED"),
-            "services_running": running,
-            "services_failed": failed,
+            "system": "OPERATOR CONSOLE",
             "services": services,
-            "reference": ref,
+            "router": router_status(),
+            "reference": self.reference.status(),
             "time": time.strftime("%Y-%m-%d %H:%M:%S"),
-            "reference_ready": ref_ready,
         }
-
-    def start_all(self) -> dict[str, Any]:
-        result = {}
-        for name in ("forwarder", "parser", "router"):
-            result[name] = self.services[name].start()
-            time.sleep(0.7)
-        return {"success": True, "results": result}
-
-    def stop_all(self) -> dict[str, Any]:
-        result = {}
-        for name in ("router", "parser", "forwarder"):
-            result[name] = self.services[name].stop()
-        return {"success": True, "results": result}
-
-    def startup(self) -> None:
-        cfg = load_config()
-        auto = cfg.get("auto_start", {}) or {}
-        for name in ("forwarder", "parser", "router"):
-            if auto.get(name, False):
-                self.services[name].start()
-                time.sleep(0.7)
-
-    def shutdown(self) -> None:
-        self.stop_all()
-        self.shutdown_event.set()
-
-    def router_sources(self) -> list[dict[str, Any]]:
-        return router_sources()
 
 
 CONSOLE = Console()
@@ -400,31 +448,28 @@ class Handler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
-    def _read_json(self) -> dict[str, Any]:
+    def _body(self) -> dict[str, Any]:
         length = int(self.headers.get("Content-Length", "0") or "0")
-        if length <= 0:
-            return {}
-        return json.loads(self.rfile.read(length).decode("utf-8"))
+        return json.loads(self.rfile.read(length).decode("utf-8")) if length else {}
 
     def do_GET(self):
         path = self.path.split("?", 1)[0]
         try:
             if path == "/api/status":
-                self._json(CONSOLE.status())
-                return
-            if path == "/api/reference/status":
-                self._json(CONSOLE.reference.status())
-                return
+                return self._json(CONSOLE.status())
             if path == "/api/router/sources":
-                self._json({"sources": CONSOLE.router_sources()})
-                return
+                return self._json(router_sources())
+            if path == "/api/router/status":
+                return self._json(router_status())
+            if path == "/api/router/browse":
+                return self._json(browse_folder("Select Router source folder"))
+            if path == "/api/reference/status":
+                return self._json(CONSOLE.reference.status())
             if path == "/api/reference/browse":
-                self._json(CONSOLE.reference.browse())
-                return
+                return self._json(browse_folder("Select reference source folder"))
             if path == "/api/health":
-                self._json({"status": "READY", "service": "validation-console"})
-                return
-            if path == "/" or path == "/index.html":
+                return self._json({"status": "READY", "service": "validation-console"})
+            if path in ("/", "/index.html"):
                 data = (WEB_ROOT / "index.html").read_bytes()
                 self.send_response(200)
                 self.send_header("Content-Type", "text/html; charset=utf-8")
@@ -433,106 +478,68 @@ class Handler(BaseHTTPRequestHandler):
                 self.wfile.write(data)
                 return
             if path.startswith("/static/"):
-                name = path.removeprefix("/static/")
-                safe = (WEB_ROOT / name).resolve()
-                if WEB_ROOT.resolve() not in safe.parents:
-                    self._json({"error": "invalid path"}, 400)
-                    return
-                if not safe.is_file():
-                    self._json({"error": "not found"}, 404)
-                    return
-                content_type = "text/css" if safe.suffix == ".css" else "text/javascript"
-                data = safe.read_bytes()
+                file_path = (WEB_ROOT / path.removeprefix("/static/")).resolve()
+                if WEB_ROOT.resolve() not in file_path.parents or not file_path.is_file():
+                    return self._json({"error": "not found"}, 404)
+                data = file_path.read_bytes()
+                ctype = "text/css" if file_path.suffix == ".css" else "text/javascript"
                 self.send_response(200)
-                self.send_header("Content-Type", content_type + "; charset=utf-8")
+                self.send_header("Content-Type", ctype + "; charset=utf-8")
                 self.send_header("Content-Length", str(len(data)))
                 self.end_headers()
                 self.wfile.write(data)
                 return
-            self._json({"error": "not found"}, 404)
+            return self._json({"error": "not found"}, 404)
         except Exception as exc:
-            self._json({"error": str(exc)}, 500)
+            return self._json({"error": str(exc)}, 500)
 
     def do_POST(self):
         path = self.path.split("?", 1)[0]
         try:
-            body = self._read_json()
-            if path == "/api/system/start":
-                self._json(CONSOLE.start_all())
-                return
-            if path == "/api/system/stop":
-                self._json(CONSOLE.stop_all())
-                return
-            for action in ("start", "stop", "restart"):
-                prefix = f"/api/service/"
-                if path.startswith(prefix) and path.endswith("/" + action):
-                    name = path[len(prefix): -len(action) - 1]
-                    if name not in CONSOLE.services:
-                        self._json({"success": False, "error": "unknown service"}, 404)
-                        return
-                    result = getattr(CONSOLE.services[name], action)()
-                    self._json(result)
-                    return
+            body = self._body()
             if path == "/api/router/source":
-                name = str(body.get("name", ""))
-                folder = str(body.get("folder", ""))
-                self._json({"success": True, "source": set_router_source(name, folder)})
-                return
+                name = str(body.pop("name", "")).strip()
+                return self._json({"success": True, "source": update_router_source(name, body)})
             if path == "/api/reference/source":
-                name = str(body.get("name", ""))
-                folder = str(body.get("folder", ""))
-                if name not in ("WRS", "PANS", "NSC") or not folder:
-                    self._json({"success": False, "error": "name and folder are required"}, 400)
-                    return
-                self._json({"success": True, "database": CONSOLE.reference.set_source(name, folder)})
-                return
+                name = str(body.get("name", "")).strip()
+                folder = str(body.get("folder", "")).strip()
+                return self._json({"success": True, "reference": CONSOLE.reference.set_source(name, folder)})
+            if path == "/api/service/":
+                return self._json({"error": "service name required"}, 400)
+            if path.startswith("/api/service/"):
+                parts = path.split("/")
+                if len(parts) == 5 and parts[-1] in ("start", "stop", "restart"):
+                    name, action = parts[-2], parts[-1]
+                    if name not in CONSOLE.services:
+                        return self._json({"error": "unknown service"}, 404)
+                    return self._json(getattr(CONSOLE.services[name], action)())
             if path == "/api/reference/validate":
                 name = str(body.get("name", ""))
-                self._json(CONSOLE.reference.validate(name))
-                return
-            if path == "/api/reference/reload":
-                # Reference data is opened by the Parser process. A reload is
-                # therefore a controlled parser restart after the source check.
-                name = str(body.get("name", ""))
-                check = CONSOLE.reference.validate(name)
-                if not check["success"]:
-                    self._json(check, 400)
-                    return
-                result = CONSOLE.services["parser"].restart()
-                self._json({"success": True, "message": "Parser restarted to reopen reference stores.", "result": result})
-                return
-            self._json({"error": "not found"}, 404)
+                status = CONSOLE.reference.status()
+                match = next((x for x in status["databases"] if x["name"] == name), None)
+                if not match:
+                    return self._json({"success": False, "message": "Unknown reference database"}, 404)
+                missing = [k for k, v in match["required"].items() if not v]
+                ok = match["source_exists"] and not missing
+                return self._json({"success": ok, "message": "Reference source is valid." if ok else "Reference source validation failed.", "status": match}, 200 if ok else 400)
+            return self._json({"error": "not found"}, 404)
         except Exception as exc:
-            self._json({"success": False, "error": str(exc)}, 500)
+            return self._json({"success": False, "error": str(exc)}, 400)
 
     def log_message(self, fmt, *args):
         return
 
 
 def run():
-    cfg = load_config()
-    host = str((cfg.get("server", {}) or {}).get("host", "127.0.0.1"))
-    port = int((cfg.get("server", {}) or {}).get("port", 8080))
+    cfg = load_yaml(CONFIG_PATH)
+    host = str((cfg.get("server") or {}).get("host", "127.0.0.1"))
+    port = int((cfg.get("server") or {}).get("port", 8080))
     server = ThreadingHTTPServer((host, port), Handler)
     server.daemon_threads = True
-
-    def stop_handler(signum=None, frame=None):
-        CONSOLE.shutdown()
-        try:
-            server.shutdown()
-        except Exception:
-            pass
-
-    signal.signal(signal.SIGINT, stop_handler)
-    if hasattr(signal, "SIGTERM"):
-        signal.signal(signal.SIGTERM, stop_handler)
-
-    CONSOLE.startup()
-    print(f"[VALIDATION] Console: http://{host}:{port}")
+    print(f"[VALIDATION] Operator Console: http://{host}:{port}")
     try:
         server.serve_forever()
     finally:
-        CONSOLE.shutdown()
         server.server_close()
 
 
