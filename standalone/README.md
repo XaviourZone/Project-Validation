@@ -65,7 +65,7 @@ Do not commit a real password. Put it in the local `standalone/db/config.json`.
 On an Internet-connected machine:
 
 ```
-python offline/download_wheels.py
+python offline/download_wheels.py --platform manylinux_2_17_x86_64 --python-version 3.13
 ```
 
 Copy `standalone/offline/wheels` to the offline Ubuntu host and install:
