@@ -1,0 +1,36 @@
+server:
+  host: 127.0.0.1
+  port: 8080
+
+auto_start:
+  router: true
+  parser: true
+  forwarder: true
+
+services:
+  router:
+    command: [router.app.main, --config, router/config/sources.yaml]
+    health_url: http://127.0.0.1:18080/health
+    log_file: logs/router.log
+  parser:
+    command: [parser.app.main, --config, parser/config/parser.yaml]
+    health_url: http://127.0.0.1:18081/health
+    log_file: logs/parser.log
+  forwarder:
+    command: [forwarder.app.main, --config, forwarder/config/forwarder.yaml]
+    health_url: http://127.0.0.1:18082/health
+    log_file: logs/forwarder.log
+
+reference:
+  WRS:
+    source_folder: ""
+    store_path: parser/reference/wrs
+    required_folders: [Datasets, Decode]
+  PANS:
+    source_folder: ""
+    store_path: parser/reference/pans
+    required_folders: [Datasets, Decode]
+  NSC:
+    source_folder: ""
+    store_path: parser/reference/nsc
+    required_folders: [Datasets, Decode]
