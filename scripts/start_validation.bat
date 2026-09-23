@@ -42,6 +42,6 @@ if %ERRORLEVEL%==0 (
 echo.
 echo [VALIDATION] Console started.
 echo [VALIDATION] Open: http://127.0.0.1:8080
-echo [VALIDATION] Router / Parser / Forwarder are controlled from the console.
+echo [VALIDATION] Start Router / Parser / Forwarder independently using their dedicated launchers.
 echo.
 pause
