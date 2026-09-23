@@ -58,6 +58,13 @@ def parser_instance(name):
 class FeedRunner:
     def __init__(self, config):
         self.cfg = config
+        db = config["DATABASE"]
+        import os
+        os.environ["VALIDATION_DB_HOST"] = str(db.get("host","127.0.0.1"))
+        os.environ["VALIDATION_DB_PORT"] = str(db.get("port",5432))
+        os.environ["VALIDATION_DB_NAME"] = str(db.get("dbname","validation"))
+        os.environ["VALIDATION_DB_USER"] = str(db.get("user","validation"))
+        os.environ["VALIDATION_DB_PASSWORD"] = str(db.get("password",""))
         self.source = config["SOURCE_ID"]
         self.logger = make_logger(self.source)
         self.reference_db = PostgresReferenceDB(config["DATABASE"])
