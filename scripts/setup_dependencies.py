@@ -136,6 +136,9 @@ def main() -> int:
         install_from_wheelhouse(py)
     else:
         missing = installed_missing(py)
+        if not missing and not wheelhouse_has_any():
+            print("[DEPS] Runtime packages are already installed, but offline/wheels is empty.")
+            print("[DEPS] Run with --download on the Internet-connected preparation machine.")
         if missing:
             print("[DEPS] Missing modules:", ", ".join(missing))
             print("[DEPS] Trying existing offline/wheels first.")
