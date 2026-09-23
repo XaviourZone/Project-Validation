@@ -1,0 +1,15 @@
+# Local runtime
+.venv/
+
+# Generated offline dependency binaries
+offline/wheels/*.whl
+offline/wheels/*.tar.gz
+
+# Runtime state/logs
+logs/
+run/
+*.log
+
+# Python cache
+__pycache__/
+*.py[cod]
