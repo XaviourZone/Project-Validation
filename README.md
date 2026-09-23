@@ -78,13 +78,12 @@ parser/reference/pans
 parser/reference/nsc
 \`\`\`
 
-The Console can load:
-- WRS CSVs from Datasets + Decode/Decode files.
-- PANS XML files using the established VesselProfile/VoyageRegistration/VesselCallNumber/BerthManagement mappings.
-- NSC CSV files into \`nsc_vessels\`, preserving EAST/WEST source-region information when the folder path contains those names.
+The Console can load and **update**:
+- **WRS** from an operator-selected folder containing `Datasets/` and either `Decode/` or `Decode files/`. Every CSV currently present in those folders is read when **LOAD/UPDATE ROCKSDB** is pressed. The existing RocksDB reference store is rebuilt from the current source contents and atomically replaced, so updated WRS CSVs are picked up on the next update.
+- **PANS** from an operator-selected folder. XML files are discovered recursively from that folder using the established VesselProfile/VoyageRegistration/VesselCallNumber/BerthManagement mappings.
+- **NSC** from an operator-selected folder containing both `NSC_EAST*.csv` and `NSC_WEST*.csv` data (or EAST/WEST subfolders). Both regional datasets are loaded into `nsc_vessels` with `SOURCE_REGION=EAST/WEST`. The Console validates that both regions are present before loading.
 
-Reference loading is intentionally blocked while Parser is reachable. Stop Parser first, load the store, then start Parser. This prevents replacing an open RocksDB directory and prevents stale in-process reference-cache results.
-
+Reference loading is intentionally blocked while Parser is reachable. Stop Parser first, load/update the store, then start Parser. This prevents replacing an open RocksDB directory and prevents stale in-process reference-cache results. Re-running **UPDATE ROCKSDB** always reads the current files in the mapped source folder; no manual deletion of the old RocksDB store is required.
 ## Legacy migration
 
 \`\`\`bash
