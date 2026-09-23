@@ -60,11 +60,25 @@ class PostgresReferenceDB:
             rows=self._rows(*ck)
             if not rows:
                 ctx=VesselContext(); self.cache[ck]=ctx; return ctx
-            keys={str(r[2]) for r in rows if r[2]}
-            if len(keys)>1:
-                # Exact identity ambiguity is rejected rather than guessed.
+            # Identity ambiguity is evaluated within each reference source.
+            # WRS/PANS/NSC naturally have different entity keys for the same
+            # vessel, so different keys across sources are not an ambiguity.
+            selected=[]
+            keys=set()
+            by_source={}
+            for row in rows:
+                by_source.setdefault(str(row[0]).upper(), []).append(row)
+            for source, source_rows in by_source.items():
+                source_keys={str(x[2]) for x in source_rows if x[2]}
+                if len(source_keys)==1:
+                    selected.extend(source_rows)
+                    keys.update(source_keys)
+                elif len(source_keys)>1:
+                    # Do not guess between conflicting records from the same source.
+                    continue
+            if not selected:
                 return VesselContext()
-            rows += self._related(keys)
+            rows = selected + self._related(keys)
             ctx=VesselContext()
             for source,dataset,entity,payload in rows:
                 p=dict(payload or {}); src=str(source).upper(); ds=str(dataset).lower()
