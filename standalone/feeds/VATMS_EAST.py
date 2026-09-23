@@ -72,6 +72,13 @@ def checksum(line):
     try:return len(s)==2 and x==int(s,16)
     except:return False
 
+FRAGMENTS={}
+FRAG_META={}
+def strip_tag(line):
+    if line.startswith("\\"):
+        e=line.find("\\",1)
+        if e>=0:return line[e+1:].lstrip()
+    return line
 def parse_ais(line):
     if line.startswith("\\"):
         z=line.find("\\",1)
@@ -108,24 +115,28 @@ def parse_payload(text):
     for line in text.splitlines():
         line=line.strip()
         if not line:continue
-        if line.startswith("$TMVTD"):
+        nmea=strip_tag(line)
+        p=nmea.split(",")
+        total=int(p[1]) if len(p)>1 and p[1].isdigit() else 1
+        seq=int(p[2]) if len(p)>2 and p[2].isdigit() else 1
+        sid=p[3] if len(p)>3 else ""
+        if total>1:
+            key=(sid,total)
+            FRAGMENTS.setdefault(key,{})[seq]=nmea
             try:
-                p=line.split(",")
-                if len(p)<14 or not checksum(line):raise ValueError("malformed TMVTD")
-                if any(x.startswith("D*") for x in p):continue
-                lat=num(p[6][:2])+num(p[6][2:])/60 if len(p)>6 and p[6] else None
-                lon=num(p[8][:3])+num(p[8][3:])/60 if len(p)>8 and p[8] else None
-                if len(p)>7 and p[7]=="S":lat=-lat
-                if len(p)>9 and p[9]=="W":lon=-lon
-                out.append({"timestamp":f"20{p[1][0:2]}-{p[1][2:4]}-{p[1][4:6]}T{p[2][0:2]}:{p[2][2:4]}:{p[2][4:6]}Z",
-                "vessel_name":clean(p[5]),"latitude":lat,"longitude":lon,"cog":num(p[10]),"sog":num(p[12]),
-                "vessel_type":clean(p[14]) if len(p)>14 else None,"callsign":clean(p[15]) if len(p)>15 else None,
-                "length":num(p[16])/100 if len(p)>16 and num(p[16]) is not None else None,"width":num(p[17])/100 if len(p)>17 and num(p[17]) is not None else None,
-                "draft":num(p[18])/100 if len(p)>18 and num(p[18]) is not None else None,"mmsi":num(p[20],True) if len(p)>20 else None,"imo":num(p[23],True) if len(p)>23 else None})
-            except Exception as e:log.warning("VATMS TMVTD rejected: %s",e)
-        elif line.startswith("!"):
-            try:out.append(parse_ais(line))
-            except Exception as e:log.warning("VATMS NMEA rejected: %s",e)
+                bits=decode6(p[5])
+                if seq==1 and len(bits)>=38:FRAG_META[key]=(int(bits[:6],2),int(bits[8:38],2))
+            except Exception:pass
+            if len(FRAGMENTS[key])<total:
+                mt,mm=FRAG_META.get(key,(None,None))
+                out.append({"mmsi":mm,"message_type":mt,"timestamp":datetime.now(timezone.utc).isoformat(),"raw_fragment":line})
+                continue
+            first=FRAGMENTS[key][1].split(","); last=FRAGMENTS[key][total].split(",")
+            payload="".join(FRAGMENTS[key][i].split(",")[5] for i in range(1,total+1))
+            nmea=",".join(first[:5]+[payload]+last[6:])
+            FRAGMENTS.pop(key,None);FRAG_META.pop(key,None)
+        try:out.append(parse_ais(nmea))
+        except Exception as e:log.warning("AIS line rejected: %s",e)
     return out
 
 def find(conn,source,table,field,value,order,conn_record=None):
