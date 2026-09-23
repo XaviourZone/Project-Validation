@@ -46,7 +46,7 @@ standalone/
 
 ## PostgreSQL
 
-Create database `validation` and run `db/schema.sql`.
+Install PostgreSQL and set the application password in local `db/config.json`. Run `python3 db/bootstrap_db.py` once to create the application role/database, then run `psql -h 127.0.0.1 -U validation -d validation -f db/schema.sql` and `python3 db/seed_defaults.py`.
 
 Default local connection:
 
