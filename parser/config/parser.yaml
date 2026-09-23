@@ -1,6 +1,6 @@
 server:
   http_host: 127.0.0.1
-  http_port: 8081
+  http_port: 18081
 endpoints:
   SAIS: {port: 10001, sources: [SAIS_IOR, SAIS_GLOBAL], framing: ndjson}
   MSIS: {port: 10002, sources: [MSIS], framing: ndjson}
