@@ -273,6 +273,69 @@ def set_pans_folder():
     CONFIG_PATH.write_text(json.dumps(CFG,indent=2),encoding="utf-8")
     return jsonify({"status":"PASS","pans_folder":str(p)})
 
+@app.post("/api/source")
+def add_source():
+    x=request.get_json(silent=True) or {}
+    with connect() as c:
+        c.execute("""INSERT INTO source(source_id,source_name,enabled,description) VALUES(%s,%s,%s,%s)
+                     ON CONFLICT(source_id) DO UPDATE SET source_name=EXCLUDED.source_name,enabled=EXCLUDED.enabled,description=EXCLUDED.description,updated_at=now()""",
+                  (int(x["source_id"]),str(x["source_name"]).strip(),bool(x.get("enabled",True)),x.get("description")))
+        c.commit()
+    return jsonify({"status":"PASS"})
+
+@app.post("/api/mapping")
+def add_mapping():
+    x=request.get_json(silent=True) or {}
+    with connect() as c:
+        c.execute("""INSERT INTO field_mapping(source_id,input_field,target_field,transformation,priority,enabled)
+                     VALUES(%s,%s,%s,%s,%s,%s)
+                     ON CONFLICT(source_id,input_field,target_field) DO UPDATE SET transformation=EXCLUDED.transformation,priority=EXCLUDED.priority,enabled=EXCLUDED.enabled""",
+                  (x.get("source_id"),x["input_field"],x["target_field"],x.get("transformation"),int(x.get("priority",1)),bool(x.get("enabled",True))))
+        c.commit()
+    return jsonify({"status":"PASS"})
+
+@app.post("/api/unlocode")
+def add_unlocode():
+    x=request.get_json(silent=True) or {}
+    code=str(x["code"]).replace(" ","").upper()
+    with connect() as c:
+        c.execute("""INSERT INTO unlocode(code,country_code,location_code,name,subdivision,status)
+                     VALUES(%s,%s,%s,%s,%s,%s)
+                     ON CONFLICT(code) DO UPDATE SET country_code=EXCLUDED.country_code,location_code=EXCLUDED.location_code,name=EXCLUDED.name,subdivision=EXCLUDED.subdivision,status=EXCLUDED.status,updated_at=now()""",
+                  (code,x.get("country_code"),x.get("location_code"),x["name"],x.get("subdivision"),x.get("status")))
+        c.commit()
+    return jsonify({"status":"PASS"})
+
+@app.post("/api/destination")
+def add_destination():
+    x=request.get_json(silent=True) or {}
+    with connect() as c:
+        c.execute("""INSERT INTO destination_mapping(source_code,destination_code,destination_name,enabled)
+                     VALUES(%s,%s,%s,%s)
+                     ON CONFLICT(source_code,destination_code,destination_name) DO UPDATE SET enabled=EXCLUDED.enabled""",
+                  (x["source_code"],x.get("destination_code"),x["destination_name"],bool(x.get("enabled",True))))
+        c.commit()
+    return jsonify({"status":"PASS"})
+
+@app.post("/api/reference-row")
+def add_reference_row():
+    x=request.get_json(silent=True) or {}
+    source=str(x["source"]).upper();table=str(x["table"]);key=str(x["row_key"]);data=x["data"]
+    with connect() as c:
+        upsert_row(c,source,table,key,data,x.get("source_file","MANUAL"),x.get("source_hash","MANUAL"))
+        c.commit()
+    return jsonify({"status":"PASS"})
+
+@app.get("/api/config")
+def config_data():
+    with connect() as c:
+        return jsonify({
+          "sources":c.execute("SELECT * FROM source ORDER BY source_id").fetchall(),
+          "mappings":c.execute("SELECT * FROM field_mapping ORDER BY source_id,priority,id").fetchall(),
+          "unlocode_count":c.execute("SELECT COUNT(*) AS n FROM unlocode").fetchone()["n"],
+          "destination_count":c.execute("SELECT COUNT(*) AS n FROM destination_mapping").fetchone()["n"]
+        })
+
 @app.get("/api/search")
 def search():
     source=request.args.get("source")
@@ -289,20 +352,31 @@ def search():
     return jsonify(rows)
 
 PAGE = """<!doctype html><html><head><meta charset=utf-8><title>Validation DB Manager</title>
-<style>body{font-family:Arial;background:#101418;color:#eee;margin:32px}button,input{padding:8px;margin:4px}pre{background:#171d22;padding:16px;overflow:auto}.card{border:1px solid #39434c;padding:16px;margin:12px 0;border-radius:8px}</style></head>
+<style>body{font-family:Arial;background:#101418;color:#eee;margin:32px}button,input,textarea{padding:8px;margin:4px}pre{background:#171d22;padding:16px;overflow:auto}.card{border:1px solid #39434c;padding:16px;margin:12px 0;border-radius:8px}textarea{width:90%;height:90px;background:#0d1114;color:#eee}</style></head>
 <body><h1>Validation — PostgreSQL Reference Manager</h1>
-<div class=card><button onclick=refresh()>Refresh</button><span id=status></span></div>
-<div class=card><h3>WRS / NSC import</h3><input id=refpath size=70 placeholder="Source folder path">
-<button onclick=imp('WRS')>Import WRS</button><button onclick=imp('NSC')>Import NSC</button></div>
+<div class=card><button onclick=refresh()>Refresh</button><pre id=status></pre></div>
+<div class=card><h3>WRS / NSC import</h3><input id=refpath size=70 placeholder="Source folder path"><button onclick=imp('WRS')>Import WRS</button><button onclick=imp('NSC')>Import NSC</button></div>
 <div class=card><h3>PANS live folder</h3><input id=pans size=70 placeholder="PANS folder path"><button onclick=setPans()>Set Folder</button></div>
+<div class=card><h3>Source ID</h3><input id=sid placeholder="1"><input id=sname placeholder="SAIS_IOR"><input id=sdesc placeholder="description"><button onclick=addSource()>Save</button></div>
+<div class=card><h3>Field mapping</h3><input id=msid placeholder="source id"><input id=mi placeholder="input field"><input id=mt placeholder="target field"><input id=mx placeholder="transformation"><button onclick=addMapping()>Save</button></div>
+<div class=card><h3>UN/LOCODE</h3><input id=ucode placeholder="INBOM"><input id=uname placeholder="MUMBAI"><input id=ucountry placeholder="IN"><input id=uloc placeholder="BOM"><button onclick=addUnlocode()>Save</button></div>
+<div class=card><h3>Destination mapping</h3><input id=dsource placeholder="MSIS"><input id=dcode placeholder="INBOM"><input id=dname placeholder="MUMBAI"><button onclick=addDestination()>Save</button></div>
+<div class=card><h3>Manual reference row</h3><input id=rsource placeholder="WRS"><input id=rtable placeholder="wrs_datasets_vessels"><input id=rkey placeholder="VESSEL_ID"><textarea id=rdata placeholder='{"VESSEL_ID":"...","MMSI":"..."}'></textarea><button onclick=addRow()>Upsert</button></div>
 <div class=card><h3>Reference search</h3><input id=q size=50 placeholder="MMSI / IMO / name / text"><button onclick=search()>Search</button><pre id=out></pre></div>
 <script>
-async function refresh(){const r=await fetch('/api/status');document.getElementById('status').textContent=JSON.stringify(await r.json());}
-async function imp(s){const r=await fetch('/api/import/'+s,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folder:document.getElementById('refpath').value})});document.getElementById('out').textContent=JSON.stringify(await r.json(),null,2);refresh();}
-async function setPans(){const r=await fetch('/api/pans/folder',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({folder:document.getElementById('pans').value})});document.getElementById('out').textContent=JSON.stringify(await r.json(),null,2);}
-async function search(){const r=await fetch('/api/search?q='+encodeURIComponent(document.getElementById('q').value));document.getElementById('out').textContent=JSON.stringify(await r.json(),null,2);}
+async function post(url,obj){const r=await fetch(url,{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(obj)});return r.json();}
+async function refresh(){document.getElementById('status').textContent=JSON.stringify(await (await fetch('/api/config')).json(),null,2);}
+async function imp(s){document.getElementById('out').textContent=JSON.stringify(await post('/api/import/'+s,{folder:document.getElementById('refpath').value}),null,2);refresh();}
+async function setPans(){document.getElementById('out').textContent=JSON.stringify(await post('/api/pans/folder',{folder:document.getElementById('pans').value}),null,2);}
+async function addSource(){document.getElementById('out').textContent=JSON.stringify(await post('/api/source',{source_id:+sid.value,source_name:sname.value,description:sdesc.value}),null,2);refresh();}
+async function addMapping(){document.getElementById('out').textContent=JSON.stringify(await post('/api/mapping',{source_id:+msid.value,input_field:mi.value,target_field:mt.value,transformation:mx.value}),null,2);refresh();}
+async function addUnlocode(){document.getElementById('out').textContent=JSON.stringify(await post('/api/unlocode',{code:ucode.value,name:uname.value,country_code:ucountry.value,location_code:uloc.value}),null,2);refresh();}
+async function addDestination(){document.getElementById('out').textContent=JSON.stringify(await post('/api/destination',{source_code:dsource.value,destination_code:dcode.value,destination_name:dname.value}),null,2);refresh();}
+async function addRow(){document.getElementById('out').textContent=JSON.stringify(await post('/api/reference-row',{source:rsource.value,table:rtable.value,row_key:rkey.value,data:JSON.parse(rdata.value)}),null,2);refresh();}
+async function search(){const r=await fetch('/api/search?q='+encodeURIComponent(q.value));document.getElementById('out').textContent=JSON.stringify(await r.json(),null,2);}
 refresh();
 </script></body></html>"""
+
 
 def main():
     global CFG, WORKER
