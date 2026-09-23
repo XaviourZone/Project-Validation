@@ -26,7 +26,7 @@ class RocksSQLCompatConnection:
  def match(self,row,field,op,val):
   a=self.norm(row.get(field));b=self.norm(val)
   if op=="=":return a.upper()==b.upper()
-  if op=="LIKE":return re.fullmatch(re.escape(b).replace(r"\%",".*").replace(r"\_",".").replace(".*",".*"),a,re.I) is not None
+  if op=="LIKE":return re.fullmatch(re.escape(b).replace("%",".*").replace("_","."),a,re.I) is not None
   return False
  def _execute(self,sql,params):
   q=re.sub(r"\s+"," ",sql.strip());m=re.match(r"SELECT (.+?) FROM ([A-Za-z0-9_]+)(?: WHERE (.*?))?(?: ORDER BY ([A-Za-z0-9_]+)(?: (ASC|DESC))?)?(?: LIMIT (\d+))?$",q,re.I)
