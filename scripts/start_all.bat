@@ -39,20 +39,13 @@ if not exist "%ROOT%\parser\reference" mkdir "%ROOT%\parser\reference"
 if not exist "%ROOT%\forwarder\state" mkdir "%ROOT%\forwarder\state"
 
 echo.
-echo [2/2] Starting services in background...
+echo [2/2] Starting independent services in background...
 echo.
 
-start "" /b cmd /c ""%PY%" -m router.app.main --config router/config/sources.yaml > "%ROOT%\logs\router.log" 2>&1"
-if errorlevel 1 echo [WARN] Router launch command failed.
-
-start "" /b cmd /c ""%PY%" -m parser.app.main --config parser/config/parser.yaml > "%ROOT%\logs\parser.log" 2>&1"
-if errorlevel 1 echo [WARN] Parser launch command failed.
-
-start "" /b cmd /c ""%PY%" -m forwarder.app.main --config forwarder/config/forwarder.yaml > "%ROOT%\logs\forwarder.log" 2>&1"
-if errorlevel 1 echo [WARN] Forwarder launch command failed.
-
-start "" /b cmd /c ""%PY%" -m console.app.main > "%ROOT%\logs\console.log" 2>&1"
-if errorlevel 1 echo [WARN] Console launch command failed.
+start "" /b "%PY%" "%ROOT%\scripts\launch_service.py" router router.app.main --config router/config/sources.yaml
+start "" /b "%PY%" "%ROOT%\scripts\launch_service.py" parser parser.app.main --config parser/config/parser.yaml
+start "" /b "%PY%" "%ROOT%\scripts\launch_service.py" forwarder forwarder.app.main --config forwarder/config/forwarder.yaml
+start "" /b "%PY%" "%ROOT%\scripts\launch_service.py" console console.app.main
 
 echo.
 echo ================================================
@@ -62,14 +55,15 @@ echo.
 echo Operator Console:
 echo   http://127.0.0.1:8080
 echo.
-echo Services run in the background.
+echo Router, Parser and Forwarder run independently
+echo in the background. This is the only launcher
+echo terminal; service output is stored in logs\.
+echo.
 echo Logs:
 echo   logs\router.log
 echo   logs\parser.log
 echo   logs\forwarder.log
 echo   logs\console.log
-echo.
-echo This window is the launcher terminal.
 echo ================================================
 echo.
 endlocal
