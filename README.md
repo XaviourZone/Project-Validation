@@ -9,7 +9,7 @@ DATA_INFLOW -> **Router** -> TCP/NDJSON -> **Parser** -> XML spool -> **Forwarde
 - **Router**: file/TCP ingestion, stable-file detection, hashing, duplicate protection, routing, retry and persistent lifecycle state.
 - **Parser**: SAIS/MSIS/LRIT/VATMS/NAIS parsing, AIS decoding, normalization, validation, positional spoofing detection, AIS/track state, WRS/PANS/NSC enrichment, fallback/provenance, XML generation and atomic XML spooling.
 - **Forwarder**: XML spool monitoring, persistent delivery state, retry and filesystem/SFTP delivery.
-- **Operator Console**: local control/configuration UI. It does not own the other services.
+- **Operator Console**: local control/configuration UI. Router, Parser and Forwarder remain independent OS processes; the launcher records their PIDs so the Console can safely monitor, start, stop and restart them without opening additional terminals.
 - **RocksDB**: the only runtime database engine. SQLite is used only by the one-time legacy migration utility.
 
 ## Start the complete system
@@ -87,7 +87,7 @@ Reference updates follow this operator workflow:
 
 **Mapped source folder → Validate → Stop Parser → Load/Update RocksDB → Start Parser → new reference data used by enrichment.**
 
-The **UPDATE ROCKSDB** action automates this sequence when Parser was started by the Console: it validates the selected source, stops Parser, rebuilds the selected reference store from the current source files, atomically replaces the store, and starts Parser again. If Parser is running outside the Console, the operation stops with a clear instruction to stop Parser manually first. If Parser was already stopped, the update leaves it stopped.
+The **UPDATE ROCKSDB** action automates this sequence: it validates the selected source, safely stops the running Parser using the launcher PID, rebuilds the selected reference store from the current source files, atomically replaces the store, and starts Parser again. If Parser was already stopped, the update leaves it stopped.
 
 - **WRS:** select one root folder containing `Datasets/` and either `Decode/` or `Decode files/`. Every current CSV below those folders is read on each update.
 - **PANS:** select a root folder; XML files are discovered recursively and loaded using the established PANS root mappings.
