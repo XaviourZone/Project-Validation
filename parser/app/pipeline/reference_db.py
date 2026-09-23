@@ -10,7 +10,7 @@ Provides a single ReferenceDB object that:
 
 import copy
 import logging
-from .rocks_sql_compat import sqlite3
+from .rocks_sql_compat import RocksDBReferenceError
 import threading
 from collections import OrderedDict
 from dataclasses import dataclass, field
@@ -372,7 +372,7 @@ class ReferenceDB:
                 if _str(rr["START_LOCATION"]): parts.append(f"FROM={_str(rr['START_LOCATION'])}")
                 if _str(rr["END_LOCATION"]): parts.append(f"TO={_str(rr['END_LOCATION'])}")
                 ctx.wrs_ais_spoofing_detail = " | ".join(parts) or "PRESENT"
-        except sqlite3.Error as exc:
+        except RocksDBReferenceError as exc:
             log.warning("WRS AIS spoofing risk lookup failed for VESSEL_ID=%s: %s", vid, exc)
 
         try:
