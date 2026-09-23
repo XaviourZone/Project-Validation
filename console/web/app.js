@@ -58,6 +58,7 @@ async function applySource(name){
     await api("/api/router/source",{method:"POST",body:JSON.stringify(body)});
     msg(name+" configuration saved. Restart Router to apply.");
     await loadSources();
+    await loadReferenceStatus();
   }catch(e){msg(e.message);}
 }
 async function browse(name){
@@ -84,3 +85,45 @@ async function refresh(){
   }catch(e){msg(e.message);}
 }
 setInterval(refresh,3000); refresh();
+async function loadReferenceStatus(){
+  try{
+    const d=await api("/api/reference/status");
+    const dbs=d.databases||[];
+    document.getElementById("references").innerHTML=dbs.map(renderReference).join("");
+    document.getElementById("reference-summary").textContent=dbs.length+" configured reference databases";
+  }catch(e){msg(e.message);}
+}
+function renderReference(d){
+  const req=Object.entries(d.required||{}).map(([k,v])=>k+":"+(v?"OK":"MISSING")).join(" · ");
+  return '<article class="reference source"><header><div><span class="type">REFERENCE</span><h3>'+esc(d.name)+'</h3></div><span class="badge '+(d.store_ready?"on":"off")+'">'+esc(d.status)+'</span></header>'+
+    '<div class="form">'+
+    '<div class="row"><label>Source folder</label><input class="wide" data-ref="folder" value="'+esc(d.source_folder)+'"><button onclick="browseReference(\''+esc(d.name)+'\')">BROWSE</button></div>'+
+    '<div class="row"><label>Store</label><span class="ref-value">'+esc(d.store_path)+'</span></div>'+
+    '<div class="row"><label>Source check</label><span class="ref-value">'+esc(req||"No folder schema required")+'</span></div>'+
+    '<div class="row"><label>Loaded</label><span class="ref-value">'+esc((d.files_loaded||0)+" files · "+(d.rows||0)+" rows")+'</span></div>'+
+    '</div><div class="actions"><button onclick="applyReference(\''+esc(d.name)+'\')">SAVE SOURCE</button><button onclick="validateReference(\''+esc(d.name)+'\')">VALIDATE</button><button onclick="loadReference(\''+esc(d.name)+'\')">LOAD ROCKSDB</button></div></article>';
+}
+function referenceCard(name){return [...document.querySelectorAll(".reference")].find(x=>x.querySelector("h3")?.textContent===name);}
+async function applyReference(name){
+  const card=referenceCard(name), folder=card.querySelector('[data-ref="folder"]').value;
+  try{await api("/api/reference/source",{method:"POST",body:JSON.stringify({name,folder})});msg(name+" source saved.");await loadReferenceStatus();}
+  catch(e){msg(e.message);}
+}
+async function browseReference(name){
+  try{
+    const r=await api("/api/reference/browse");
+    if(r.success){referenceCard(name).querySelector('[data-ref="folder"]').value=r.path;msg(r.message);}
+    else msg(r.message);
+  }catch(e){msg(e.message);}
+}
+async function validateReference(name){
+  try{const r=await api("/api/reference/validate",{method:"POST",body:JSON.stringify({name})});msg(r.message);}
+  catch(e){msg(e.message);}
+}
+async function loadReference(name){
+  try{
+    const r=await api("/api/reference/load",{method:"POST",body:JSON.stringify({name})});
+    msg(name+" RocksDB loaded: "+((r.manifest?.rows)||0)+" rows.");
+    await loadReferenceStatus();
+  }catch(e){msg(e.message);}
+}
