@@ -155,7 +155,7 @@ def upsert_row(conn, source: str, table: str, key: str, data: dict, source_file:
         "SELECT data,source_file,source_hash FROM reference_rows WHERE source_name=%s AND table_name=%s AND row_key=%s",
         (source,table,key)
     ).fetchone()
-    if old:
+    if old and old["data"] != data:
         conn.execute(
             "INSERT INTO reference_row_history(source_name,table_name,row_key,data,source_file,source_hash) VALUES(%s,%s,%s,%s,%s,%s)",
             (source,table,key,old["data"],old["source_file"],old["source_hash"])
