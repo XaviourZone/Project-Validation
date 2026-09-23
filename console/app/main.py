@@ -491,6 +491,54 @@ class Console:
             "time": time.strftime("%Y-%m-%d %H:%M:%S"),
         }
 
+    def update_reference(self, name: str) -> dict[str, Any]:
+        """Validate, safely stop Parser, rebuild the reference store, then restore Parser."""
+        status = self.reference.status()
+        match = next((x for x in status["databases"] if x["name"] == name), None)
+        if not match:
+            raise ValueError(f"Unknown reference database: {name}")
+        missing = [k for k, v in match["required"].items() if not v]
+        if not match["source_exists"] or missing:
+            raise ValueError(
+                f"{name} source validation failed: " +
+                (", ".join(missing) if missing else "source folder is missing")
+            )
+
+        parser = self.services["parser"]
+        parser_status = parser.status()
+        parser_was_running = bool(parser_status["health"].get("reachable"))
+        if parser_was_running and not parser_status["owned_by_console"]:
+            raise ValueError(
+                "Parser is running outside this Console. Stop Parser first, then run UPDATE again."
+            )
+
+        if parser_was_running:
+            parser.stop()
+
+        try:
+            result = self.reference.load(name)
+        except Exception:
+            if parser_was_running:
+                parser.start()
+            raise
+
+        restart_result = None
+        if parser_was_running:
+            restart_result = parser.start()
+            if not restart_result.get("success"):
+                raise RuntimeError(
+                    f"{name} updated, but Parser could not be restarted: "
+                    f"{restart_result.get('error', 'unknown error')}"
+                )
+
+        return {
+            "success": True,
+            "database": name,
+            "manifest": result["manifest"],
+            "parser_restarted": parser_was_running,
+            "status": self.status(),
+        }
+
 
 CONSOLE = Console()
 
@@ -573,6 +621,9 @@ class Handler(BaseHTTPRequestHandler):
             if path == "/api/reference/load":
                 name = str(body.get("name", "")).strip()
                 return self._json(CONSOLE.reference.load(name))
+            if path == "/api/reference/update":
+                name = str(body.get("name", "")).strip()
+                return self._json(CONSOLE.update_reference(name))
             if path == "/api/reference/validate":
                 name = str(body.get("name", ""))
                 status = CONSOLE.reference.status()
