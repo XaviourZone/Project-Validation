@@ -1,235 +1,86 @@
-let latest = null;
+let sourceData=null;
 
-async function api(path, options = {}) {
-  const response = await fetch(path, {
-    cache: "no-store",
-    headers: {"Content-Type": "application/json"},
-    ...options
-  });
-  const data = await response.json();
-  if (!response.ok) throw new Error(data.error || data.message || "Request failed");
-  return data;
+async function api(path, options={}) {
+  const r=await fetch(path,{cache:"no-store",headers:{"Content-Type":"application/json"},...options});
+  const d=await r.json();
+  if(!r.ok) throw new Error(d.error||d.message||"Request failed");
+  return d;
 }
-
-function setMessage(value) {
-  document.getElementById("message").textContent = value;
-}
-
-function stateClass(state) {
-  if (state === "RUNNING") return "running";
-  if (state === "STARTING") return "starting";
-  if (state === "READY") return "ready";
-  if (state === "FAILED") return "error";
-  return "stopped";
-}
-
-async function updateRouterSources() {
-  const box = document.getElementById("router-sources");
-  if (!box) return;
-  try {
-    const data = await api("/api/router/sources");
-    box.innerHTML = (data.sources || []).map(item => {
-      const encoded = encodeURIComponent(item.name);
-      return [
-        '<div class="ref-row">',
-        '<div class="ref-row-head"><span class="ref-name">' + item.name + '</span><span class="badge ' + (item.exists ? "ready" : "stopped") + '">' + (item.exists ? "READY" : "MISSING") + '</span></div>',
-        '<div class="ref-path">' + item.folder + '</div>',
-        '<div class="ref-actions">',
-        '<button onclick="browseRouterSource(' + "'" + encoded + "'" + ')">CHANGE FOLDER</button>',
-        '</div>',
-        '</div>'
-      ].join("");
-    }).join("");
-  } catch (error) {
-    box.textContent = error.message;
+function esc(v){return String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));}
+function msg(v){document.getElementById("message").textContent=v;}
+function serviceState(x){return x?.health?.reachable?"RUNNING":"STOPPED";}
+function renderSource(s){
+  const c=s.config||{};
+  const common='<div class="row"><label>Enabled</label><input type="checkbox" data-k="enabled" '+(s.enabled?"checked":"")+'></div>'+
+    '<div class="row"><label>Parser</label><select data-k="parser">'+Object.keys(sourceData.parser_destinations||{}).map(x=>'<option '+(x===s.parser?"selected":"")+'>'+esc(x)+'</option>').join("")+'</select></div>';
+  let specific="";
+  if(s.type==="file"){
+    specific=
+      '<div class="row"><label>Folder</label><input class="wide" data-k="folder" value="'+esc(s.folder)+'"><button onclick="browse(\''+esc(s.name)+'\')">BROWSE</button></div>'+
+      '<div class="row"><label>File patterns</label><input class="wide" data-k="file_patterns" value="'+esc((s.patterns||[]).join(", "))+'"></div>'+
+      '<div class="row"><label>Poll seconds</label><input type="number" step="0.1" data-k="poll_interval_seconds" value="'+esc(s.poll_interval_seconds)+'"><label>Stability</label><input type="number" step="0.1" data-k="stability_window_seconds" value="'+esc(s.stability_window_seconds)+'"></div>'+
+      '<div class="row"><label>Preserve file</label><input type="checkbox" data-k="preserve_file" '+(s.preserve_file?"checked":"")+'><label>Processed folder</label><input class="wide" data-k="processed_folder" value="'+esc(s.processed_folder)+'"></div>';
+  }else{
+    specific=
+      '<div class="row"><label>Remote host</label><input class="wide" data-k="remote_host" value="'+esc(s.host)+'"><label>Port</label><input type="number" data-k="remote_port" value="'+esc(s.port)+'"></div>'+
+      '<div class="row"><label>Framing</label><select data-k="framing"><option '+(s.framing==="line"?"selected":"")+' value="line">LINE</option><option '+(s.framing==="length_prefixed"?"selected":"")+' value="length_prefixed">LENGTH PREFIXED</option><option '+(s.framing==="raw_block"?"selected":"")+' value="raw_block">RAW BLOCK</option></select><label>Delimiter</label><input data-k="delimiter" value="'+esc(s.delimiter)+'"></div>'+
+      '<div class="row"><label>Max bytes</label><input type="number" data-k="max_line_length" value="'+esc(s.max_line_length)+'"><label>Reconnect initial</label><input type="number" step="0.1" data-k="reconnect_initial_delay" value="'+esc(s.reconnect_initial_delay)+'"></div>'+
+      '<div class="row"><label>Reconnect max</label><input type="number" step="0.1" data-k="reconnect_max_delay" value="'+esc(s.reconnect_max_delay)+'"><label>Multiplier</label><input type="number" step="0.1" data-k="reconnect_multiplier" value="'+esc(s.reconnect_multiplier)+'"></div>';
   }
+  return '<article class="source '+(s.enabled?"enabled":"disabled")+'"><header><div><span class="type">'+esc(s.type.toUpperCase())+'</span><h3>'+esc(s.name)+'</h3></div><span class="badge '+(s.enabled?"on":"off")+'">'+(s.enabled?"ENABLED":"DISABLED")+'</span></header><div class="form">'+common+specific+'</div><div class="actions"><button onclick="applySource(\''+esc(s.name)+'\')">APPLY</button><span class="pathstate">'+(s.type==="file"?(s.exists?"FOLDER OK":"FOLDER MISSING"):(s.host+":"+s.port))+'</span></div></article>';
 }
-
-async function browseRouterSource(encodedName) {
-  const name = decodeURIComponent(encodedName);
-  setMessage("Opening folder picker...");
-  try {
-    const picked = await api("/api/reference/browse");
-    if (!picked.success) {
-      setMessage(picked.message);
-      return;
+async function loadSources(){
+  sourceData=await api("/api/router/sources");
+  document.getElementById("sources").innerHTML=(sourceData.sources||[]).map(renderSource).join("");
+  document.getElementById("router-summary").textContent=(sourceData.sources||[]).length+" configured sources · "+Object.keys(sourceData.parser_destinations||{}).length+" parser destinations · "+sourceData.base_dir;
+}
+function sourceCard(name){return [...document.querySelectorAll(".source")].find(x=>x.querySelector("h3")?.textContent===name);}
+function val(card,k){
+  const e=card.querySelector('[data-k="'+k+'"]');
+  if(e.type==="checkbox") return e.checked;
+  return e.value;
+}
+async function applySource(name){
+  const card=sourceCard(name); const s=sourceData.sources.find(x=>x.name===name);
+  const body={name};
+  ["enabled","parser"].forEach(k=>body[k]=val(card,k));
+  if(s.type==="file"){
+    body.folder=val(card,"folder");
+    body.file_patterns=val(card,"file_patterns").split(",").map(x=>x.trim()).filter(Boolean);
+    body.poll_interval_seconds=Number(val(card,"poll_interval_seconds"));
+    body.stability_window_seconds=Number(val(card,"stability_window_seconds"));
+    body.preserve_file=val(card,"preserve_file");
+    body.processed_folder=val(card,"processed_folder");
+  }else{
+    ["remote_host","remote_port","framing","delimiter","max_line_length","reconnect_initial_delay","reconnect_max_delay","reconnect_multiplier"].forEach(k=>body[k]=val(card,k));
+  }
+  try{
+    await api("/api/router/source",{method:"POST",body:JSON.stringify(body)});
+    msg(name+" configuration saved. Restart Router to apply.");
+    await loadSources();
+  }catch(e){msg(e.message);}
+}
+async function browse(name){
+  try{
+    const r=await api("/api/router/browse");
+    if(r.success){sourceCard(name).querySelector('[data-k="folder"]').value=r.path;}
+    msg(r.message);
+  }catch(e){msg(e.message);}
+}
+async function serviceAction(name,action){
+  try{await api("/api/service/"+name+"/"+action,{method:"POST",body:"{}"});msg(name.toUpperCase()+" "+action.toUpperCase()+" requested");setTimeout(refresh,500);}
+  catch(e){msg(e.message);}
+}
+async function refresh(){
+  try{
+    const d=await api("/api/status");
+    for(const n of ["router","parser","forwarder"]){
+      const e=document.getElementById(n+"-state"); const st=serviceState(d.services[n]);
+      e.textContent=st; e.className="state "+(st==="RUNNING"?"good":"");
     }
-    await api("/api/router/source", {
-      method: "POST",
-      body: JSON.stringify({name: name, folder: picked.path})
-    });
-    setMessage(name + " folder updated; restarting Router...");
-    await api("/api/service/router/restart", {method: "POST", body: "{}"});
-    await updateRouterSources();
-    setTimeout(refresh, 800);
-  } catch (error) {
-    setMessage(error.message);
-  }
+    document.getElementById("clock").textContent=d.time.split(" ")[1]||d.time;
+    document.getElementById("router-status").textContent=JSON.stringify(d.router,null,2);
+    await loadSources();
+  }catch(e){msg(e.message);}
 }
-
-function updateService(name, item) {
-  const badge = document.getElementById(name + "-badge");
-  const state = document.getElementById(name + "-state");
-  const pid = document.getElementById(name + "-pid");
-  const uptime = document.getElementById(name + "-uptime");
-  const detail = document.getElementById(name + "-detail");
-
-  badge.textContent = item.state;
-  badge.className = "badge " + stateClass(item.state);
-  state.textContent = item.state;
-  pid.textContent = item.pid || "—";
-  uptime.textContent = item.uptime_seconds ? formatUptime(item.uptime_seconds) : "—";
-  detail.textContent = JSON.stringify({
-    state: item.state,
-    pid: item.pid,
-    health: item.health,
-    last_error: item.last_error || ""
-  }, null, 2);
-}
-
-function formatUptime(seconds) {
-  seconds = Math.floor(seconds || 0);
-  const h = Math.floor(seconds / 3600);
-  const m = Math.floor((seconds % 3600) / 60);
-  const s = seconds % 60;
-  return String(h).padStart(2, "0") + ":" + String(m).padStart(2, "0") + ":" + String(s).padStart(2, "0");
-}
-
-function updateReference(data) {
-  const rows = data.databases || [];
-  rows.forEach(item => {
-    const el = document.getElementById(item.name.toLowerCase() + "-state");
-    if (el) el.textContent = item.status;
-  });
-
-  const ready = rows.filter(x => x.store_ready).length;
-  const badge = document.getElementById("reference-badge");
-  badge.textContent = ready + "/" + rows.length + " READY";
-  badge.className = "badge " + (ready === rows.length ? "ready" : "starting");
-
-  const list = document.getElementById("reference-list");
-  list.innerHTML = rows.map(item => {
-    const required = Object.keys(item.required || {}).map(k => k + ": " + (item.required[k] ? "OK" : "MISSING")).join(" · ");
-    const safe = encodeURIComponent(item.name);
-    return [
-      '<div class="ref-row">',
-      '<div class="ref-row-head"><span class="ref-name">' + item.name + '</span><span class="badge ' + (item.store_ready ? "ready" : "stopped") + '">' + item.status + '</span></div>',
-      '<div class="ref-path">SOURCE: ' + (item.source_folder || "not configured") + '</div>',
-      '<div class="ref-path">STORE: ' + item.store_path + '</div>',
-      '<div class="ref-path">' + (required || "Source folder not checked") + '</div>',
-      '<div class="ref-actions">',
-      '<button onclick="browseReference(' + "'" + safe + "'" + ')">BROWSE</button>',
-      '<button onclick="validateReference(' + "'" + safe + "'" + ')">VALIDATE</button>',
-      '<button onclick="reloadReference(' + "'" + safe + "'" + ')">RELOAD PARSER</button>',
-      '</div>',
-      '</div>'
-    ].join("");
-  }).join("");
-}
-
-async function refresh() {
-  try {
-    const data = await api("/api/status");
-    latest = data;
-    document.getElementById("system-state").textContent = data.system;
-    document.getElementById("system-dot").style.background =
-      data.system === "RUNNING" ? "var(--good)" :
-      data.system === "DEGRADED" ? "var(--warn)" : "var(--muted)";
-    ["router", "parser", "forwarder"].forEach(name => updateService(name, data.services[name]));
-    updateReference(data.reference);
-    updateRouterSources();
-    document.getElementById("clock").textContent = data.time.split(" ")[1] || data.time;
-  } catch (error) {
-    setMessage(error.message);
-  }
-}
-
-async function serviceAction(name, action) {
-  setMessage(name.toUpperCase() + " " + action.toUpperCase() + "...");
-  try {
-    await api("/api/service/" + name + "/" + action, {method: "POST", body: "{}"});
-    setMessage(name.toUpperCase() + " " + action.toUpperCase() + " requested");
-  } catch (error) {
-    setMessage(error.message);
-  }
-  setTimeout(refresh, 500);
-}
-
-async function systemAction(action) {
-  setMessage("SYSTEM " + action.toUpperCase() + "...");
-  try {
-    await api("/api/system/" + action, {method: "POST", body: "{}"});
-    setMessage("SYSTEM " + action.toUpperCase() + " requested");
-  } catch (error) {
-    setMessage(error.message);
-  }
-  setTimeout(refresh, 500);
-}
-
-function togglePanel(id) {
-  document.getElementById(id).classList.toggle("open");
-}
-
-async function referenceRefresh() {
-  setMessage("Checking reference stores...");
-  try {
-    const data = await api("/api/reference/status");
-    updateReference(data);
-    setMessage("Reference status updated");
-  } catch (error) {
-    setMessage(error.message);
-  }
-}
-
-async function browseReference(encodedName) {
-  const name = decodeURIComponent(encodedName);
-  setMessage("Opening folder picker...");
-  try {
-    const picked = await api("/api/reference/browse");
-    if (!picked.success) {
-      setMessage(picked.message);
-      return;
-    }
-    await api("/api/reference/source", {
-      method: "POST",
-      body: JSON.stringify({name: name, folder: picked.path})
-    });
-    setMessage(name + " source updated");
-    await referenceRefresh();
-  } catch (error) {
-    setMessage(error.message);
-  }
-}
-
-async function validateReference(encodedName) {
-  const name = decodeURIComponent(encodedName);
-  setMessage("Validating " + name + "...");
-  try {
-    const result = await api("/api/reference/validate", {
-      method: "POST",
-      body: JSON.stringify({name: name})
-    });
-    setMessage(result.message);
-    await referenceRefresh();
-  } catch (error) {
-    setMessage(error.message);
-  }
-}
-
-async function reloadReference(encodedName) {
-  const name = decodeURIComponent(encodedName);
-  setMessage("Checking " + name + "...");
-  try {
-    const result = await api("/api/reference/reload", {
-      method: "POST",
-      body: JSON.stringify({name: name})
-    });
-    setMessage(result.message || "Parser reload requested");
-    setTimeout(refresh, 800);
-  } catch (error) {
-    setMessage(error.message);
-  }
-}
-
-setInterval(refresh, 2000);
-refresh();
+setInterval(refresh,3000); refresh();
