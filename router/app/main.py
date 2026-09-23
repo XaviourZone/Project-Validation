@@ -43,7 +43,7 @@ class DataRouterService:
         # 2. Load and validate configuration
         self.config: RouterConfig = load_config(self.config_path)
 
-        # 3. Initialize SQLite state store
+        # 3. Initialize RocksDB state store
         db_path = Path(self.config.state.db_path)
         if not db_path.is_absolute():
             db_path = self.base_dir / db_path

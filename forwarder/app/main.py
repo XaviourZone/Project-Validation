@@ -14,11 +14,7 @@ def project_root():
     value = os.environ.get("VALIDATION_HOME")
     if value:
         return Path(value).resolve()
-    here = Path(__file__).resolve()
-    for parent in [here, *here.parents]:
-        if (parent / "Validation").is_dir():
-            return parent
-    return Path.cwd()
+    return Path(__file__).resolve().parents[2]
 
 
 def main():

@@ -2,10 +2,10 @@
 Reference database access layer.
 
 Provides a single ReferenceDB object that:
-- holds read-only connections to WRS, PANS, NSC SQLite databases
+- holds read-only connections to WRS, PANS, NSC RocksDB stores
 - exposes a resolve(mmsi, imo, callsign) method returning one VesselContext
 - performs one compound lookup per record (not per field)
-- uses in-process SQLite (thread-safe in WAL mode)
+- uses the RocksDB-backed SQL compatibility adapter
 """
 
 import copy
@@ -133,7 +133,11 @@ class VesselContext:
         return self.nsc_matched
 
 
-def _find_default_db(subdir: str, filename: str) -> Path:\n    return Path(__file__).resolve().parents[3] / "parser" / "reference" / subdir.lower()\n\n\nclass ReferenceDB:
+def _find_default_db(subdir: str, filename: str) -> Path:
+    return Path(__file__).resolve().parents[3] / "parser" / "reference" / subdir.lower()
+
+
+class ReferenceDB:
     """Thread-safe reference database access for WRS, PANS and NSC."""
 
     def __init__(
