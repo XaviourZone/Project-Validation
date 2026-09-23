@@ -112,7 +112,7 @@ CREATE TABLE IF NOT EXISTS vessel_state (
 CREATE TABLE IF NOT EXISTS vessel_state_history (
     id BIGSERIAL PRIMARY KEY,
     mmsi BIGINT NOT NULL,
-    values JSONB NOT NULL,
+    state_values JSONB NOT NULL,
     event_timestamp TIMESTAMPTZ,
     source TEXT,
     recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
