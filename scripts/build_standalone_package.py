@@ -57,7 +57,7 @@ def main():
       "http_host":"127.0.0.1","http_port":5050,
       "spool":{"input_dir":"forwarder/spool/pending","archive_dir":"forwarder/spool/delivered","failed_dir":"forwarder/spool/failed","state_db":"forwarder/state/delivery","secret_file":"forwarder/state/forwarder_secrets.json","poll_interval_seconds":1,"claim_timeout_seconds":300},
       "retry":{"max_attempts":5,"initial_delay_seconds":2.0,"max_delay_seconds":60.0,"multiplier":2.0},
-      "destinations":{"LOCAL":{"enabled":True,"protocol":"local","local_path":"forwarder/output"},"D-DIODE-01":{"enabled":False,"protocol":"sftp","host":"127.0.0.1","port":22,"remote_path":"/home/ddiode/txserver/in/","username":"ddiode","private_key_file":"","connect_timeout_seconds":10,"verify_remote_size":True}},
+      "destinations":{"LOCAL":{"enabled":True,"protocol":"filesystem","remote_path":"forwarder/output","verify_remote_size":True},"D-DIODE-01":{"enabled":False,"protocol":"sftp","host":"127.0.0.1","port":22,"remote_path":"/home/ddiode/txserver/in/","username":"ddiode","private_key_file":"","connect_timeout_seconds":10,"verify_remote_size":True}},
       "logging":{"level":"INFO"}}
 
     write(OUT/"router/control.json",json.dumps(router,indent=2))
@@ -110,6 +110,8 @@ import runpy; runpy.run_module("forwarder.app.main",run_name="__main__")
     write(OUT/"db/README.md","Shared RocksDB storage implementation used by Router, Parser and Forwarder. SQLite is not used at runtime.\n")
     write(OUT/"README.md","Validation standalone four-service package. No web UI. Run each service with python start.py. Controls are in control.json. Ports: Router 5000; Parser 5001; Parser inputs 5010-5014; Forwarder 5050. Use Python 3.11 or 3.12.\n")
     if not compileall.compile_dir(str(OUT),quiet=1): raise SystemExit("compile failed")
+    for p in OUT.rglob("__pycache__"):
+        shutil.rmtree(p, ignore_errors=True)
     zip_path=ROOT/"validation-standalone-5050.zip"
     if zip_path.exists(): zip_path.unlink()
     with zipfile.ZipFile(zip_path,"w",zipfile.ZIP_DEFLATED) as z:
