@@ -252,16 +252,21 @@ def browse_folder(title: str) -> dict[str, Any]:
 
 
 class ServiceController:
-    """Optional process control. Services are independent and are not owned by Console."""
+    """Control an independent service and adopt launcher-started processes."""
 
     def __init__(self, name: str, definition: dict[str, Any]):
         self.name = name
         self.definition = definition
         self.process: subprocess.Popen | None = None
+        self.managed_pid: int | None = None
         self.log_handle = None
         self.started_at: float | None = None
         self.last_error = ""
         self.lock = threading.RLock()
+
+    @property
+    def pid_file(self) -> Path:
+        return ROOT / "run" / f"{self.name}.pid"
 
     def _command(self) -> list[str]:
         configured = self.definition.get("command") or SERVICE_DEFAULTS[self.name]["command"]
@@ -281,18 +286,85 @@ class ServiceController:
         except Exception as exc:
             return {"reachable": False, "status": "UNREACHABLE", "error": str(exc)}
 
+    @staticmethod
+    def _pid_alive(pid: int) -> bool:
+        if pid <= 0:
+            return False
+        if os.name == "nt":
+            try:
+                result = subprocess.run(
+                    ["tasklist", "/FI", f"PID eq {pid}", "/NH"],
+                    capture_output=True,
+                    text=True,
+                    check=False,
+                )
+                return str(pid) in result.stdout
+            except Exception:
+                return False
+        try:
+            os.kill(pid, 0)
+            return True
+        except OSError:
+            return False
+
+    def _read_pidfile(self) -> int | None:
+        try:
+            pid = int(self.pid_file.read_text(encoding="utf-8").strip())
+            return pid if self._pid_alive(pid) else None
+        except (OSError, ValueError):
+            return None
+
+    def _clear_pidfile(self) -> None:
+        try:
+            self.pid_file.unlink(missing_ok=True)
+        except OSError:
+            pass
+
+    def _adopt_launcher_process(self) -> None:
+        if self.process is not None:
+            return
+        pid = self._read_pidfile()
+        if pid is not None:
+            self.managed_pid = pid
+            return
+        self.managed_pid = None
+
     def refresh_process(self) -> None:
-        if self.process is not None and self.process.poll() is not None:
-            code = self.process.returncode
-            self.process = None
-            if code not in (0, None):
-                self.last_error = f"process exited with code {code}"
+        if self.process is not None:
+            if self.process.poll() is not None:
+                code = self.process.returncode
+                self.process = None
+                self.managed_pid = None
+                self._clear_pidfile()
+                if code not in (0, None):
+                    self.last_error = f"process exited with code {code}"
+            else:
+                self.managed_pid = self.process.pid
+                return
+        pid = self._read_pidfile()
+        if pid is not None:
+            self.managed_pid = pid
+        else:
+            self.managed_pid = None
+            self._clear_pidfile()
 
     def start(self) -> dict[str, Any]:
         with self.lock:
             self.refresh_process()
-            if self.process is not None:
-                return {"success": True, "message": f"{self.name} is already running", **self.status()}
+            health = self._health()
+            if health.get("reachable"):
+                return {
+                    "success": True,
+                    "message": f"{self.name} is already running",
+                    **self.status(),
+                }
+            if self.managed_pid is not None:
+                return {
+                    "success": True,
+                    "message": f"{self.name} is starting",
+                    **self.status(),
+                }
+
             ensure_runtime_dirs()
             log_path = ROOT / str(self.definition.get("log_file", f"logs/{self.name}.log"))
             log_path.parent.mkdir(parents=True, exist_ok=True)
@@ -303,41 +375,73 @@ class ServiceController:
             flags = getattr(subprocess, "CREATE_NEW_PROCESS_GROUP", 0) if os.name == "nt" else 0
             try:
                 self.process = subprocess.Popen(
-                    self._command(), cwd=str(ROOT), env=env,
-                    stdin=subprocess.DEVNULL, stdout=self.log_handle,
-                    stderr=subprocess.STDOUT, creationflags=flags,
+                    self._command(),
+                    cwd=str(ROOT),
+                    env=env,
+                    stdin=subprocess.DEVNULL,
+                    stdout=self.log_handle,
+                    stderr=subprocess.STDOUT,
+                    creationflags=flags,
                 )
+                self.managed_pid = self.process.pid
+                self.pid_file.write_text(str(self.process.pid), encoding="utf-8")
                 self.started_at = time.time()
                 self.last_error = ""
-                return {"success": True, "message": f"{self.name} start requested", **self.status()}
+                return {
+                    "success": True,
+                    "message": f"{self.name} start requested",
+                    **self.status(),
+                }
             except Exception as exc:
                 self.last_error = str(exc)
                 if self.log_handle:
                     self.log_handle.close()
                     self.log_handle = None
+                self._clear_pidfile()
                 return {"success": False, "error": str(exc), **self.status()}
 
     def stop(self) -> dict[str, Any]:
         with self.lock:
             self.refresh_process()
-            if self.process is None:
-                return {"success": True, "message": f"{self.name} is not owned by this console process", **self.status()}
-            proc = self.process
+            pid = self.process.pid if self.process is not None else self.managed_pid
+            if pid is None:
+                return {
+                    "success": True,
+                    "message": f"{self.name} is not running",
+                    **self.status(),
+                }
+
             try:
-                if os.name == "nt":
-                    proc.terminate()
+                if self.process is not None:
+                    self.process.terminate()
+                    try:
+                        self.process.wait(timeout=8)
+                    except subprocess.TimeoutExpired:
+                        self.process.kill()
+                        self.process.wait(timeout=3)
+                elif os.name == "nt":
+                    subprocess.run(
+                        ["taskkill", "/PID", str(pid), "/T", "/F"],
+                        capture_output=True,
+                        text=True,
+                        check=False,
+                    )
                 else:
-                    proc.send_signal(signal.SIGTERM)
-                proc.wait(timeout=8)
-            except subprocess.TimeoutExpired:
-                proc.kill()
-                proc.wait(timeout=3)
+                    os.kill(pid, signal.SIGTERM)
+                    deadline = time.time() + 8
+                    while self._pid_alive(pid) and time.time() < deadline:
+                        time.sleep(0.2)
+                    if self._pid_alive(pid):
+                        os.kill(pid, signal.SIGKILL)
             finally:
                 self.process = None
+                self.managed_pid = None
                 self.started_at = None
+                self._clear_pidfile()
                 if self.log_handle:
                     self.log_handle.close()
                     self.log_handle = None
+
             return {"success": True, "message": f"{self.name} stopped", **self.status()}
 
     def restart(self) -> dict[str, Any]:
@@ -347,21 +451,21 @@ class ServiceController:
 
     def status(self) -> dict[str, Any]:
         self.refresh_process()
-        owned = self.process is not None and self.process.poll() is None
         health = self._health()
         reachable = bool(health.get("reachable"))
+        running = self.managed_pid is not None
         if reachable:
             state = "RUNNING"
-        elif owned:
+        elif running:
             state = "STARTING"
         else:
             state = "STOPPED"
         return {
             "name": self.name,
             "state": state,
-            "owned_by_console": owned,
-            "pid": self.process.pid if owned else None,
-            "uptime_seconds": round(time.time() - self.started_at, 1) if owned and self.started_at else 0,
+            "owned_by_console": running,
+            "pid": self.managed_pid,
+            "uptime_seconds": round(time.time() - self.started_at, 1) if self.started_at else 0,
             "health": health,
             "last_error": self.last_error,
         }
