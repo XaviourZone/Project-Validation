@@ -100,3 +100,22 @@ INSERT INTO source(source_id,source_name,description) VALUES
 (6,'VATMS_WEST','VATMS West Transas/network feed'),
 (7,'NAIS','National AIS network feed')
 ON CONFLICT(source_id) DO UPDATE SET source_name=EXCLUDED.source_name, description=EXCLUDED.description, updated_at=now();
+
+CREATE TABLE IF NOT EXISTS vessel_state (
+    mmsi BIGINT PRIMARY KEY,
+    values JSONB NOT NULL DEFAULT '{}'::jsonb,
+    last_timestamp TIMESTAMPTZ,
+    last_source TEXT,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS vessel_state_history (
+    id BIGSERIAL PRIMARY KEY,
+    mmsi BIGINT NOT NULL,
+    values JSONB NOT NULL,
+    event_timestamp TIMESTAMPTZ,
+    source TEXT,
+    recorded_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ix_vessel_state_source ON vessel_state(last_source);
